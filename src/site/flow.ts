@@ -46,10 +46,15 @@ export class BrowserSession implements SiteSession {
 
     await this.go(page, HOME);
     await this.assertNotBlocked(page);
-    const href = await page.evaluate(() => {
-      const a = Array.from(document.querySelectorAll('a')).find((x) => /^\s*Manage booking\s*$/i.test(x.textContent ?? ''));
-      return a ? (a as HTMLAnchorElement).href : null;
-    });
+    // 站点慢的时候，正文先出来，链接要过一会儿才有，所以要等
+    let href: string | null = null;
+    for (let i = 0; i < 30 && !href; i++) {
+      href = await page.evaluate(() => {
+        const a = Array.from(document.querySelectorAll('a')).find((x) => /^\s*Manage booking\s*$/i.test(x.textContent ?? ''));
+        return a ? (a as HTMLAnchorElement).href : null;
+      }).catch(() => null);
+      if (!href) await page.waitForTimeout(1000);
+    }
     if (!href) throw new SiteError('unknown_page', '首页上找不到 "Manage booking" 链接');
     // 直接点这个链接会超时，取出地址再跳转
     await this.go(page, href);
