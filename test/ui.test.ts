@@ -1,0 +1,237 @@
+import { randomBytes } from 'node:crypto';
+import { afterEach, describe, expect, test } from 'vitest';
+import { DEFAULT_SETTINGS } from '../src/config/settings.ts';
+import { Service } from '../src/engine/service.ts';
+import { FakeClock } from '../src/scheduler/clock.ts';
+import { openDb } from '../src/storage/db.ts';
+import { Repo } from '../src/storage/repo.ts';
+import { startUiServer, type UiServer } from '../src/ui/server.ts';
+import { FakeSession, NOW, SILVERWATER, SILVERWATER_NAME, centreList, centres } from './helpers/fakes.ts';
+
+let server: UiServer | null = null;
+afterEach(async () => {
+  await server?.close();
+  server = null;
+});
+
+async function setup(opts: { fetchCurrent?: () => Promise<{ centreName: string; date: string; time: string }> } = {}) {
+  const repo = new Repo(openDb(':memory:'), randomBytes(32));
+  const clock = new FakeClock(NOW);
+  const limiter = { acquire: async () => {}, reportBlocked: () => 1, reportOk: () => {} };
+  const service = new Service({
+    repo, clock, limiter, settings: DEFAULT_SETTINGS, centres,
+    openSession: async () => new FakeSession(),
+    notify: (e) => server?.publish(e),
+  });
+  server = await startUiServer({
+    repo, service, centreList,
+    fetchCurrent: opts.fetchCurrent ?? (async () => ({ centreName: SILVERWATER_NAME, date: '2026-12-30', time: '11:30' })),
+    autoRebookEnabled: false,
+    now: () => clock.now(),
+  });
+  const call = (method: string, path: string, body?: unknown, token: string | null = server!.token) =>
+    fetch(`http://127.0.0.1:${server!.port}${path}`, {
+      method,
+      headers: { ...(token ? { 'X-Token': token } : {}), 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  return { repo, service, call, clock };
+}
+
+const goodTarget = { centreIds: [SILVERWATER], dateFrom: '2026-11-16', dateTo: '2026-11-20', timeFrom: '09:00', timeTo: '12:00' };
+
+describe('令牌', () => {
+  test('没带令牌 401；令牌不对 401；带对了 200', async () => {
+    const { call } = await setup();
+    expect((await call('GET', '/api/students', undefined, null)).status).toBe(401);
+    expect((await call('GET', '/api/students', undefined, 'wrong')).status).toBe(401);
+    expect((await call('GET', '/api/students')).status).toBe(200);
+  });
+  test('页面本身不含任何学员数据，可以直接打开', async () => {
+    await setup();
+    const res = await fetch(`http://127.0.0.1:${server!.port}/`);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain('<title>');
+  });
+  test('只监听本机地址', async () => {
+    await setup();
+    expect(server!.url.startsWith('http://127.0.0.1:')).toBe(true);
+  });
+  test('静态文件路径不能跳出目录', async () => {
+    await setup();
+    const res = await fetch(`http://127.0.0.1:${server!.port}/..%2Fserver.ts`);
+    expect(res.status).toBe(404);
+  });
+});
+
+describe('学员', () => {
+  test('新增后返回的是脱敏数据：只有 Booking number 末 3 位，没有姓氏', async () => {
+    const { call } = await setup();
+    const res = await call('POST', '/api/students', { label: '学员A', bookingId: '1234567890', surname: 'Testsurname' });
+    expect(res.status).toBe(201);
+    const text = JSON.stringify(await res.json());
+    expect(text).toContain('890');
+    expect(text).not.toContain('1234567890');
+    expect(text).not.toContain('Testsurname');
+    const list = JSON.stringify(await (await call('GET', '/api/students')).json());
+    expect(list).not.toContain('1234567890');
+    expect(list).not.toContain('Testsurname');
+  });
+
+  test('新增时会读取当前预约，并默认把目标考点设为当前考点', async () => {
+    const { call } = await setup();
+    const s = (await (await call('POST', '/api/students', { label: 'A', bookingId: '1234567890', surname: 'T' })).json()) as {
+      current: { date: string }; target: { centreIds: number[] };
+    };
+    expect(s.current.date).toBe('2026-12-30');
+    expect(s.target.centreIds).toEqual([SILVERWATER]);
+  });
+
+  test('读取预约失败（资料不对）：422，不保存', async () => {
+    const { call, repo } = await setup({ fetchCurrent: async () => { throw new Error('Booking number 或姓氏不正确'); } });
+    const res = await call('POST', '/api/students', { label: 'A', bookingId: '1234567890', surname: 'T' });
+    expect(res.status).toBe(422);
+    expect(((await res.json()) as { error: string }).error).toContain('不正确');
+    expect(repo.listStudents()).toHaveLength(0);
+  });
+
+  test('输入不合法：400', async () => {
+    const { call } = await setup();
+    expect((await call('POST', '/api/students', { label: '', bookingId: '1234567890', surname: 'T' })).status).toBe(400);
+    expect((await call('POST', '/api/students', { label: 'A', bookingId: 'abc', surname: 'T' })).status).toBe(400);
+    expect((await call('POST', '/api/students', { label: 'A', bookingId: '1234567890', surname: '' })).status).toBe(400);
+  });
+
+  test('删除学员', async () => {
+    const { call, repo } = await setup();
+    const id = ((await (await call('POST', '/api/students', { label: 'A', bookingId: '1234567890', surname: 'T' })).json()) as { id: number }).id;
+    expect((await call('DELETE', `/api/students/${id}`)).status).toBe(200);
+    expect(repo.listStudents()).toHaveLength(0);
+    expect((await call('DELETE', `/api/students/${id}`)).status).toBe(404);
+  });
+});
+
+describe('目标校验', () => {
+  const create = async (call: Awaited<ReturnType<typeof setup>>['call']) =>
+    ((await (await call('POST', '/api/students', { label: 'A', bookingId: '1234567890', surname: 'T' })).json()) as { id: number }).id;
+
+  test('合法目标：200 并保存', async () => {
+    const { call, repo } = await setup();
+    const id = await create(call);
+    expect((await call('PUT', `/api/students/${id}/target`, goodTarget)).status).toBe(200);
+    expect(repo.getStudent(id)!.target).toEqual(goodTarget);
+  });
+
+  test.each([
+    ['结束日期早于开始日期', { ...goodTarget, dateFrom: '2026-11-20', dateTo: '2026-11-16' }],
+    ['开始时间不早于结束时间', { ...goodTarget, timeFrom: '12:00', timeTo: '12:00' }],
+    ['日期格式不对', { ...goodTarget, dateFrom: '16/11/2026' }],
+    ['日期不存在', { ...goodTarget, dateFrom: '2026-02-30' }],
+    ['时间格式不对', { ...goodTarget, timeFrom: '9am' }],
+    ['没有选考点', { ...goodTarget, centreIds: [] }],
+    ['考点不存在', { ...goodTarget, centreIds: [99999] }],
+  ])('不合法：%s → 400，且不保存', async (_name, bad) => {
+    const { call, repo } = await setup();
+    const id = await create(call);
+    const before = repo.getStudent(id)!.target;
+    expect((await call('PUT', `/api/students/${id}/target`, bad)).status).toBe(400);
+    expect(repo.getStudent(id)!.target).toEqual(before);
+  });
+
+  test('学员不存在：404', async () => {
+    const { call } = await setup();
+    expect((await call('PUT', '/api/students/999/target', goodTarget)).status).toBe(404);
+  });
+});
+
+describe('开始与暂停', () => {
+  test('start 后状态为 running，pause 后为 paused', async () => {
+    const { call, service } = await setup();
+    const id = ((await (await call('POST', '/api/students', { label: 'A', bookingId: '1234567890', surname: 'T' })).json()) as { id: number }).id;
+    const started = (await (await call('POST', `/api/students/${id}/start`)).json()) as { status: string };
+    expect(started.status).toBe('running');
+    const paused = (await (await call('POST', `/api/students/${id}/pause`)).json()) as { status: string };
+    expect(paused.status).toBe('paused');
+    await service.stopAll();
+  });
+
+  test('超过上限：409，界面看不到上限数字', async () => {
+    const { call, service } = await setup();
+    const ids: number[] = [];
+    for (const l of ['A', 'B', 'C']) {
+      ids.push(((await (await call('POST', '/api/students', { label: l, bookingId: '1234567890', surname: 'T' })).json()) as { id: number }).id);
+    }
+    expect((await call('POST', `/api/students/${ids[0]}/start`)).status).toBe(200);
+    expect((await call('POST', `/api/students/${ids[1]}/start`)).status).toBe(200);
+    const res = await call('POST', `/api/students/${ids[2]}/start`);
+    expect(res.status).toBe(409);
+    expect(JSON.stringify(await res.json())).not.toMatch(/\b2\b/);
+    const state = JSON.stringify(await (await call('GET', '/api/state')).json());
+    expect(state).not.toContain('maxActiveStudents');
+    expect(state).not.toContain('checkInterval');
+    await service.stopAll();
+  });
+});
+
+describe('待确认考位', () => {
+  async function withOffer() {
+    const t = await setup();
+    const sid = t.repo.addStudent({
+      label: 'A', bookingId: '1234567890', surname: 'T',
+      current: { centreName: SILVERWATER_NAME, date: '2026-12-30', time: '11:30' }, target: goodTarget,
+    });
+    const offerId = t.repo.addOffer({ studentId: sid, centreId: SILVERWATER, date: '2026-11-17', time: '13:00', notes: ['时间超出目标时间段 60 分钟'] }, 1)!;
+    return { ...t, sid, offerId };
+  }
+
+  test('列表只含待处理的', async () => {
+    const { call, offerId, service } = await withOffer();
+    expect(((await (await call('GET', '/api/offers')).json()) as unknown[]).length).toBe(1);
+    await call('POST', `/api/offers/${offerId}/dismiss`);
+    expect(((await (await call('GET', '/api/offers')).json()) as unknown[]).length).toBe(0);
+    await service.stopAll();
+  });
+
+  test('不存在的待确认考位：404', async () => {
+    const { call } = await withOffer();
+    expect((await call('POST', '/api/offers/9999/accept')).status).toBe(404);
+    expect((await call('POST', '/api/offers/9999/dismiss')).status).toBe(404);
+  });
+
+  test('accept 返回处理结果（自动改约关闭时是 dry_run）', async () => {
+    const t = await withOffer();
+    const session = new FakeSession();
+    session.slotsByCentre.set(SILVERWATER, [{ centreId: SILVERWATER, date: '2026-11-17', time: '13:00' }]);
+    (t.service as unknown as { deps: { openSession: () => Promise<FakeSession> } }).deps.openSession = async () => session;
+    const res = await t.call('POST', `/api/offers/${t.offerId}/accept`);
+    expect(await res.json()).toEqual({ result: 'dry_run' });
+    expect(session.calls).not.toContain('finish');
+  });
+});
+
+describe('事件推送', () => {
+  test('publish 的事件能通过 SSE 收到', async () => {
+    const t = await setup();
+    const sid = t.repo.addStudent({
+      label: '学员A', bookingId: '1234567890', surname: 'T',
+      current: { centreName: SILVERWATER_NAME, date: '2026-12-30', time: '11:30' }, target: goodTarget,
+    });
+    const ac = new AbortController();
+    const res = await fetch(`http://127.0.0.1:${server!.port}/api/events?t=${server!.token}`, { signal: ac.signal });
+    expect(res.headers.get('content-type')).toContain('text/event-stream');
+    const reader = res.body!.getReader();
+    await reader.read(); // ": connected"
+    server!.publish({ type: 'stopped', studentId: sid, reason: '测试' });
+    const { value } = await reader.read();
+    const text = new TextDecoder().decode(value);
+    expect(text).toContain('event: message');
+    expect(text).toContain('学员A');
+    expect(text).toContain('测试');
+    ac.abort();
+  });
+
+  test('事件接口也需要令牌', async () => {
+    await setup();
+    expect((await fetch(`http://127.0.0.1:${server!.port}/api/events`)).status).toBe(401);
+  });
+});

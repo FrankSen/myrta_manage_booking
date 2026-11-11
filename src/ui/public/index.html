@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>驾考改约助手</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header>
+  <h1>驾考改约助手</h1>
+  <span id="mode" class="badge"></span>
+  <button id="btn-notify" hidden>开启桌面通知</button>
+</header>
+<main>
+  <section id="offers-box" hidden>
+    <h2>待你确认的考位</h2>
+    <div id="offers"></div>
+  </section>
+  <section>
+    <div class="row"><h2>学员</h2><button id="btn-add">添加学员</button></div>
+    <div id="students"></div>
+  </section>
+  <section>
+    <h2>运行记录</h2>
+    <div id="logs" class="logs"></div>
+  </section>
+</main>
+
+<dialog id="dlg-add">
+  <form method="dialog" id="form-add">
+    <h3>添加学员</h3>
+    <label>备注名（给自己看，不用写全名）<input name="label" required></label>
+    <label>Booking number<input name="bookingId" inputmode="numeric" required></label>
+    <label>姓氏（与预约一致）<input name="surname" required></label>
+    <p class="hint">添加时会登录一次，读取当前预约。大约需要半分钟。</p>
+    <p class="error" id="add-error"></p>
+    <div class="row"><button value="cancel" formnovalidate>取消</button><button id="add-submit" value="ok">添加</button></div>
+  </form>
+</dialog>
+
+<dialog id="dlg-target">
+  <form method="dialog" id="form-target">
+    <h3 id="target-title">设置目标</h3>
+    <label>目标考点（可多选，按住 Ctrl 或 Shift 选）<select name="centreIds" multiple size="10" id="centre-select"></select></label>
+    <div class="grid2">
+      <label>最早日期<input type="date" name="dateFrom" required></label>
+      <label>最晚日期<input type="date" name="dateTo" required></label>
+      <label>最早时间<input type="time" name="timeFrom" required></label>
+      <label>最晚时间<input type="time" name="timeTo" required></label>
+    </div>
+    <p class="error" id="target-error"></p>
+    <div class="row"><button value="cancel" formnovalidate>取消</button><button id="target-submit" value="ok">保存</button></div>
+  </form>
+</dialog>
+<script src="/app.js"></script>
+</body>
+</html>

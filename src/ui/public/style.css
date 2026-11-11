@@ -1,0 +1,30 @@
+* { box-sizing: border-box; }
+body { margin: 0; font: 15px/1.5 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; color: #1f2933; background: #f4f6f8; }
+header { display: flex; align-items: center; gap: 12px; padding: 12px 20px; background: #fff; border-bottom: 1px solid #d9e0e6; }
+header h1 { font-size: 18px; margin: 0; flex: 1; }
+main { max-width: 960px; margin: 0 auto; padding: 16px; }
+section { background: #fff; border: 1px solid #d9e0e6; border-radius: 8px; padding: 12px 16px; margin-bottom: 16px; }
+h2 { font-size: 16px; margin: 4px 0 10px; }
+.row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+button { font: inherit; padding: 5px 14px; border: 1px solid #aab4be; border-radius: 6px; background: #fff; cursor: pointer; }
+button.primary { background: #1565c0; border-color: #1565c0; color: #fff; }
+button.danger { color: #b71c1c; border-color: #e0a0a0; }
+button:disabled { opacity: .5; cursor: default; }
+.badge { font-size: 12px; padding: 2px 8px; border-radius: 10px; background: #fff3cd; color: #7a5c00; }
+.card { border: 1px solid #d9e0e6; border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; }
+.card.attention { border-color: #f0b429; background: #fffbea; }
+.card .meta { color: #52606d; font-size: 13px; }
+.card .actions { margin-top: 8px; display: flex; gap: 8px; flex-wrap: wrap; }
+.status { font-size: 12px; padding: 1px 8px; border-radius: 10px; background: #e4e7eb; }
+.status.running { background: #d3f5e0; color: #0b6b32; }
+.status.paused, .status.pending_confirm { background: #fff3cd; color: #7a5c00; }
+.status.done { background: #d6e8ff; color: #0b3d91; }
+.status.stopped { background: #e4e7eb; }
+.logs { font: 13px/1.6 ui-monospace, Menlo, Consolas, monospace; max-height: 260px; overflow: auto; }
+.logs .warn { color: #8a5a00; } .logs .error { color: #b71c1c; }
+dialog { border: 1px solid #aab4be; border-radius: 10px; padding: 18px; width: min(480px, 92vw); }
+dialog label { display: block; margin: 10px 0; font-size: 14px; }
+dialog input, dialog select { display: block; width: 100%; margin-top: 4px; padding: 6px; font: inherit; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
+.error { color: #b71c1c; min-height: 1.4em; margin: 6px 0; }
+.hint { color: #52606d; font-size: 13px; }
