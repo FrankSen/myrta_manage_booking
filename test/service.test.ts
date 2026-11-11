@@ -252,3 +252,31 @@ describe('互斥与退出', () => {
     expect(t.sessions.get(a)!.calls.length).toBe(calls);
   });
 });
+
+describe('退出时不被限速等待卡住', () => {
+  test('检查正卡在全局限速的长时间等待里，stopAll 也能马上返回', async () => {
+    const repo = new Repo(openDb(':memory:'), randomBytes(32));
+    const clock = new FakeClock(NOW);
+    const { Limiter } = await import('../src/scheduler/limiter.ts');
+    const limiter = new Limiter(clock, DEFAULT_SETTINGS.hidden);
+    limiter.reportBlocked(); // 5 分钟退避
+    limiter.reportBlocked(); // 10 分钟
+    limiter.reportBlocked(); // 20 分钟
+    const sessions: FakeSession[] = [];
+    const service = new Service({
+      repo, clock, limiter, settings: DEFAULT_SETTINGS, centres,
+      openSession: async () => { const s = new FakeSession(); sessions.push(s); return s; },
+      notify: () => {},
+    });
+    const id = repo.addStudent({
+      label: 'S', bookingId: '1234567890', surname: 'T',
+      current: { centreName: 'Silverwater Service NSW Centre', date: '2026-12-30', time: '11:30' }, target: baseTarget,
+    });
+    service.startStudent(id);
+    await clock.advance(0); // 登录完成，正在等 20 分钟的退避
+    expect(sessions[0]!.calls).toEqual(['login']);
+    await service.stopAll(); // 没有 clock.advance，不能卡住
+    expect(sessions[0]!.closed).toBe(true);
+    expect(repo.getStudent(id)!.status).toBe('running'); // 被中断不是失败，不改状态
+  });
+});

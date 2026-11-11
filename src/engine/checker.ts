@@ -32,6 +32,8 @@ export interface CheckDeps {
   repo: Repo;
   limiter: Pick<Limiter, 'acquire' | 'reportBlocked' | 'reportOk'>;
   clock: Clock;
+  /** 程序退出或学员被暂停时触发，用来中断限速等待 */
+  signal?: AbortSignal;
   getSession(studentId: number): Promise<SiteSession>;
   /** 会话可能已损坏时丢弃，下一轮重新建 */
   dropSession(studentId: number): Promise<void>;
@@ -72,6 +74,7 @@ export async function checkStudent(studentId: number, deps: CheckDeps): Promise<
       deps.state.failStreak.delete(studentId);
       return outcome;
     } catch (err) {
+      if (deps.signal?.aborted) return 'stop';
       // 登录页控件偶尔没初始化：重来一次，仍失败才报警
       if (err instanceof SiteError && err.kind === 'widgets_missing' && attempt === 0) {
         await deps.dropSession(studentId);
@@ -110,7 +113,7 @@ async function runRound(student: Student, deps: CheckDeps): Promise<CheckOutcome
   const to = addDays(target.dateTo, tolerance.maxDateDays);
 
   for (const centreId of centresToCheck(student, deps)) {
-    await limiter.acquire();
+    await limiter.acquire(deps.signal);
     const slots = await session.listSlots(centreId, from, to);
     limiter.reportOk();
 

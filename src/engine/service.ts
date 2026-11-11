@@ -35,6 +35,7 @@ export class Service {
   private readonly sessions = new Map<number, SiteSession>();
   private readonly locks = new Map<number, Promise<unknown>>();
   private readonly state = newCheckState();
+  private readonly abort = new AbortController();
 
   constructor(deps: ServiceDeps) {
     this.deps = deps;
@@ -84,6 +85,7 @@ export class Service {
   }
 
   async stopAll(): Promise<void> {
+    this.abort.abort();
     for (const id of this.scheduler.activeIds()) this.scheduler.stop(id);
     await Promise.allSettled([...this.locks.values()]);
     for (const id of [...this.sessions.keys()]) await this.dropSession(id);
@@ -101,6 +103,7 @@ export class Service {
       repo: d.repo,
       limiter: d.limiter,
       clock: d.clock,
+      signal: this.abort.signal,
       getSession: (id) => this.getSession(id),
       dropSession: (id) => this.dropSession(id),
       tolerance: d.settings.tolerance,
@@ -137,7 +140,7 @@ export class Service {
     try {
       const session = await this.getSession(student.id);
       repo.setCurrent(student.id, await session.login(student.bookingId, student.surname));
-      await limiter.acquire();
+      await limiter.acquire(this.abort.signal);
       const listed = await session.listSlots(offer.centreId, offer.date, offer.date);
       limiter.reportOk();
       if (!listed.some((s) => s.centreId === slot.centreId && s.date === slot.date && s.time === slot.time)) {

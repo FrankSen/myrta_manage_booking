@@ -3,12 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=24" },
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc -p .",
-    "start": "node src/cli.ts",
-    "smoke": "node scripts/smoke.ts"
+    "start": "node src/main.ts"
   },
   "devDependencies": {
     "@types/node": "^24.19.2",
