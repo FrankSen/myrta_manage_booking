@@ -1,0 +1,882 @@
+[
+ {
+  "id": 17,
+  "name": "Albury Service NSW Centre",
+  "suburb": "Albury",
+  "postcode": "2640",
+  "lat": -36.08266,
+  "lng": 146.916778
+ },
+ {
+  "id": 18,
+  "name": "Armidale Service NSW Centre",
+  "suburb": "Armidale",
+  "postcode": "2350",
+  "lat": -30.512211,
+  "lng": 151.658106
+ },
+ {
+  "id": 112,
+  "name": "Auburn Service NSW Centre",
+  "suburb": "Auburn",
+  "postcode": "2144",
+  "lat": -33.8473492,
+  "lng": 151.0426569
+ },
+ {
+  "id": 19,
+  "name": "Ballina Service NSW Centre",
+  "suburb": "Ballina",
+  "postcode": "2478",
+  "lat": -28.84482,
+  "lng": 153.558542
+ },
+ {
+  "id": 20,
+  "name": "Bankstown Service NSW Centre",
+  "suburb": "Bankstown",
+  "postcode": "2200",
+  "lat": -33.9158801,
+  "lng": 151.0400397
+ },
+ {
+  "id": 21,
+  "name": "Batemans Bay Service NSW Centre",
+  "suburb": "Batemans Bay",
+  "postcode": "2536",
+  "lat": -35.71097531,
+  "lng": 150.1768134
+ },
+ {
+  "id": 22,
+  "name": "Bathurst Service NSW Centre",
+  "suburb": "Bathurst",
+  "postcode": "2795",
+  "lat": -33.41375686,
+  "lng": 149.5450167
+ },
+ {
+  "id": 23,
+  "name": "Bega Service NSW Centre",
+  "suburb": "Bega",
+  "postcode": "2550",
+  "lat": -36.67579262,
+  "lng": 149.8401026
+ },
+ {
+  "id": 26,
+  "name": "Blacktown Service NSW Centre",
+  "suburb": "Blacktown",
+  "postcode": "2148",
+  "lat": -33.78130225,
+  "lng": 150.9187652
+ },
+ {
+  "id": 27,
+  "name": "Blue Mountains Service NSW Agency",
+  "suburb": "Katoomba",
+  "postcode": "2780",
+  "lat": -33.71077472,
+  "lng": 150.3125423
+ },
+ {
+  "id": 28,
+  "name": "Bondi Junction Service NSW Centre",
+  "suburb": "Bondi Junction",
+  "postcode": "2022",
+  "lat": -33.8935,
+  "lng": 151.25168
+ },
+ {
+  "id": 29,
+  "name": "Botany Service NSW Centre",
+  "suburb": "Botany",
+  "postcode": "2019",
+  "lat": -33.9405377,
+  "lng": 151.1966299
+ },
+ {
+  "id": 30,
+  "name": "Broken Hill Service NSW Centre",
+  "suburb": "Broken Hill",
+  "postcode": "2880",
+  "lat": -31.9631014,
+  "lng": 141.4466522
+ },
+ {
+  "id": 77,
+  "name": "Brookvale Service NSW Centre",
+  "suburb": "Brookvale",
+  "postcode": "2100",
+  "lat": -33.7644013,
+  "lng": 151.2585826
+ },
+ {
+  "id": 34,
+  "name": "Casino Service NSW Centre",
+  "suburb": "Casino",
+  "postcode": "2470",
+  "lat": -28.8619135,
+  "lng": 153.0460868
+ },
+ {
+  "id": 35,
+  "name": "Castle Hill Service NSW Centre",
+  "suburb": "Castle Hill",
+  "postcode": "2154",
+  "lat": -33.7262769,
+  "lng": 150.9762487
+ },
+ {
+  "id": 36,
+  "name": "Cessnock Service NSW Centre",
+  "suburb": "Cessnock",
+  "postcode": "2325",
+  "lat": -32.83553975,
+  "lng": 151.3531508
+ },
+ {
+  "id": 37,
+  "name": "Chatswood Service NSW Centre",
+  "suburb": "Chatswood",
+  "postcode": "2067",
+  "lat": -33.794436,
+  "lng": 151.188732
+ },
+ {
+  "id": 39,
+  "name": "Coffs Harbour Service NSW Centre",
+  "suburb": "Coffs Harbour",
+  "postcode": "2450",
+  "lat": -30.29664284,
+  "lng": 153.1179718
+ },
+ {
+  "id": 40,
+  "name": "Cooma Service NSW Centre",
+  "suburb": "Cooma",
+  "postcode": "2630",
+  "lat": -36.2350372,
+  "lng": 149.1236198
+ },
+ {
+  "id": 42,
+  "name": "Cootamundra Service NSW Centre",
+  "suburb": "Cootamundra",
+  "postcode": "2590",
+  "lat": -34.63885,
+  "lng": 148.02534
+ },
+ {
+  "id": 43,
+  "name": "Corrimal Service NSW Centre",
+  "suburb": "Corrimal",
+  "postcode": "2518",
+  "lat": -34.371497,
+  "lng": 150.898151
+ },
+ {
+  "id": 44,
+  "name": "Cowra Service NSW Centre",
+  "suburb": "Cowra",
+  "postcode": "2794",
+  "lat": -33.835539,
+  "lng": 148.691412
+ },
+ {
+  "id": 45,
+  "name": "Deniliquin Service NSW Centre",
+  "suburb": "Deniliquin",
+  "postcode": "2710",
+  "lat": -35.532225,
+  "lng": 144.963055
+ },
+ {
+  "id": 46,
+  "name": "Dubbo Service NSW Centre",
+  "suburb": "Dubbo",
+  "postcode": "2830",
+  "lat": -32.251316,
+  "lng": 148.6007984
+ },
+ {
+  "id": 581,
+  "name": "Eastgardens Service Centre",
+  "suburb": "Eastgardens",
+  "postcode": "2036",
+  "lat": -33.9448896,
+  "lng": 151.2243238
+ },
+ {
+  "id": 47,
+  "name": "Eden Service NSW Centre",
+  "suburb": "Eden",
+  "postcode": "2551",
+  "lat": -37.0657069,
+  "lng": 149.9049129
+ },
+ {
+  "id": 501,
+  "name": "Edmondson Park Service NSW Centre",
+  "suburb": "Edmondson Park",
+  "postcode": "2174",
+  "lat": -33.9717903,
+  "lng": 150.8567354
+ },
+ {
+  "id": 381,
+  "name": "Engadine Service NSW Centre",
+  "suburb": "Engadine",
+  "postcode": "2233",
+  "lat": -34.0656337,
+  "lng": 151.0120314
+ },
+ {
+  "id": 49,
+  "name": "Erina Service NSW Centre",
+  "suburb": "Erina",
+  "postcode": "2250",
+  "lat": -33.437049,
+  "lng": 151.38409
+ },
+ {
+  "id": 51,
+  "name": "Finley Service NSW Centre",
+  "suburb": "Finley",
+  "postcode": "2713",
+  "lat": -35.64212,
+  "lng": 145.57787
+ },
+ {
+  "id": 53,
+  "name": "Forbes Service NSW Centre",
+  "suburb": "Forbes",
+  "postcode": "2871",
+  "lat": -33.3845922,
+  "lng": 148.0036274
+ },
+ {
+  "id": 56,
+  "name": "Glen Innes Service NSW Centre",
+  "suburb": "GLEN INNES",
+  "postcode": "2370",
+  "lat": -29.739927,
+  "lng": 151.7340503
+ },
+ {
+  "id": 661,
+  "name": "Glenmore Park Service Centre",
+  "suburb": "Glenmore Park",
+  "postcode": "2745",
+  "lat": -33.7892138,
+  "lng": 150.6677331
+ },
+ {
+  "id": 57,
+  "name": "Gosford Service NSW Centre",
+  "suburb": "Gosford",
+  "postcode": "2250",
+  "lat": -33.42620963,
+  "lng": 151.3447711
+ },
+ {
+  "id": 58,
+  "name": "Goulburn Service NSW Centre",
+  "suburb": "Goulburn",
+  "postcode": "2580",
+  "lat": -34.750715,
+  "lng": 149.721786
+ },
+ {
+  "id": 59,
+  "name": "Grafton Service NSW Centre",
+  "suburb": "Grafton",
+  "postcode": "2460",
+  "lat": -29.689605,
+  "lng": 152.932372
+ },
+ {
+  "id": 60,
+  "name": "Griffith Service NSW Centre",
+  "suburb": "Griffith",
+  "postcode": "2680",
+  "lat": -34.2902351,
+  "lng": 146.0442325
+ },
+ {
+  "id": 61,
+  "name": "Gunnedah Service NSW Centre",
+  "suburb": "Gunnedah",
+  "postcode": "2380",
+  "lat": -30.983482,
+  "lng": 150.26153
+ },
+ {
+  "id": 62,
+  "name": "Hay Service NSW Centre",
+  "suburb": "Hay",
+  "postcode": "2711",
+  "lat": -34.50774,
+  "lng": 144.84418
+ },
+ {
+  "id": 63,
+  "name": "Hornsby Service NSW Centre",
+  "suburb": "Hornsby",
+  "postcode": "2077",
+  "lat": -33.696609,
+  "lng": 151.0983154
+ },
+ {
+  "id": 66,
+  "name": "Inverell Service NSW Centre",
+  "suburb": "Inverell",
+  "postcode": "2360",
+  "lat": -29.7698035,
+  "lng": 151.1150354
+ },
+ {
+  "id": 67,
+  "name": "Kempsey Service NSW Centre",
+  "suburb": "West Kempsey",
+  "postcode": "2440",
+  "lat": -31.080521,
+  "lng": 152.827762
+ },
+ {
+  "id": 68,
+  "name": "Kiama Service NSW Centre",
+  "suburb": "Kiama",
+  "postcode": "2533",
+  "lat": -34.671313,
+  "lng": 150.854454
+ },
+ {
+  "id": 69,
+  "name": "Leeton Service NSW Centre",
+  "suburb": "Leeton",
+  "postcode": "2705",
+  "lat": -34.55451767,
+  "lng": 146.4038341
+ },
+ {
+  "id": 71,
+  "name": "Lightning Ridge Service NSW Centre",
+  "suburb": "Lightning Ridge",
+  "postcode": "2834",
+  "lat": -29.43001,
+  "lng": 147.97115
+ },
+ {
+  "id": 72,
+  "name": "Lismore Testing Centre",
+  "suburb": "East Lismore",
+  "postcode": "2480",
+  "lat": -28.80795,
+  "lng": 153.27969
+ },
+ {
+  "id": 73,
+  "name": "Lithgow Service NSW Centre",
+  "suburb": "Lithgow",
+  "postcode": "2790",
+  "lat": -33.4887146,
+  "lng": 150.1523407
+ },
+ {
+  "id": 74,
+  "name": "Liverpool Service NSW Centre",
+  "suburb": "Liverpool",
+  "postcode": "2170",
+  "lat": -33.906459,
+  "lng": 150.920917
+ },
+ {
+  "id": 32,
+  "name": "Macarthur Service NSW Centre",
+  "suburb": "Gregory Hills",
+  "postcode": "2557",
+  "lat": -34.025674,
+  "lng": 150.764316
+ },
+ {
+  "id": 75,
+  "name": "Maclean Service NSW Centre",
+  "suburb": "Maclean",
+  "postcode": "2463",
+  "lat": -29.459188,
+  "lng": 153.196979
+ },
+ {
+  "id": 641,
+  "name": "Macquarie Fields Driver Testing Centre",
+  "suburb": "Macquarie Fields",
+  "postcode": "2564",
+  "lat": -33.9843811,
+  "lng": 150.8911806
+ },
+ {
+  "id": 76,
+  "name": "Maitland Service NSW Centre",
+  "suburb": "East Maitland",
+  "postcode": "2323",
+  "lat": -32.760322,
+  "lng": 151.590585
+ },
+ {
+  "id": 79,
+  "name": "Marrickville Service NSW Centre",
+  "suburb": "Marrickville",
+  "postcode": "2204",
+  "lat": -33.90748,
+  "lng": 151.17321
+ },
+ {
+  "id": 521,
+  "name": "Merrylands Service NSW Centre",
+  "suburb": "Merrylands",
+  "postcode": "2160",
+  "lat": -33.8342366,
+  "lng": 150.9879007
+ },
+ {
+  "id": 81,
+  "name": "Miranda Service NSW Centre",
+  "suburb": "Miranda",
+  "postcode": "2228",
+  "lat": -34.0337869,
+  "lng": 151.0971573
+ },
+ {
+  "id": 82,
+  "name": "Mittagong Service NSW Centre",
+  "suburb": "Mittagong",
+  "postcode": "2575",
+  "lat": -34.4447052,
+  "lng": 150.426192
+ },
+ {
+  "id": 401,
+  "name": "Mobile Service Centre 1",
+  "suburb": "Penrith",
+  "postcode": "2750",
+  "lat": -33.7599126,
+  "lng": 150.6840405
+ },
+ {
+  "id": 601,
+  "name": "Mobile Service Centre 6",
+  "suburb": "Lidcombe",
+  "postcode": "2141",
+  "lat": -33.85554777377189,
+  "lng": 151.0385528362244
+ },
+ {
+  "id": 83,
+  "name": "Moree Service NSW Centre",
+  "suburb": "Moree",
+  "postcode": "2400",
+  "lat": -29.4641468,
+  "lng": 149.8397819
+ },
+ {
+  "id": 84,
+  "name": "Moruya Service NSW Centre",
+  "suburb": "Moruya",
+  "postcode": "2537",
+  "lat": -35.91028407,
+  "lng": 150.0835665
+ },
+ {
+  "id": 86,
+  "name": "Mudgee Service NSW Centre",
+  "suburb": "Mudgee",
+  "postcode": "2850",
+  "lat": -32.59459,
+  "lng": 149.5889
+ },
+ {
+  "id": 87,
+  "name": "Murwillumbah Service NSW Centre",
+  "suburb": "Murwillumbah",
+  "postcode": "2484",
+  "lat": -28.32969122,
+  "lng": 153.4021175
+ },
+ {
+  "id": 88,
+  "name": "Muswellbrook Service NSW Centre",
+  "suburb": "Muswellbrook",
+  "postcode": "2333",
+  "lat": -32.2826974,
+  "lng": 150.8942257
+ },
+ {
+  "id": 89,
+  "name": "Nambucca Heads Service NSW Centre",
+  "suburb": "Nambucca Heads",
+  "postcode": "2448",
+  "lat": -30.63334,
+  "lng": 152.97422
+ },
+ {
+  "id": 91,
+  "name": "Narooma Service NSW Centre",
+  "suburb": "Narooma",
+  "postcode": "2546",
+  "lat": -36.22303397,
+  "lng": 150.1270927
+ },
+ {
+  "id": 92,
+  "name": "Narrabri Service NSW Centre",
+  "suburb": "Narrabri",
+  "postcode": "2390",
+  "lat": -30.320155,
+  "lng": 149.781252
+ },
+ {
+  "id": 93,
+  "name": "Narrandera Service NSW Centre",
+  "suburb": "Narrandera",
+  "postcode": "2700",
+  "lat": -34.74711,
+  "lng": 146.55236
+ },
+ {
+  "id": 94,
+  "name": "Nelson Bay Service NSW Centre",
+  "suburb": "Nelson Bay",
+  "postcode": "2315",
+  "lat": -32.72369864,
+  "lng": 152.1443778
+ },
+ {
+  "id": 95,
+  "name": "Newcastle Service NSW Centre",
+  "suburb": "Newcastle West",
+  "postcode": "2302",
+  "lat": -32.930371,
+  "lng": 151.764062
+ },
+ {
+  "id": 621,
+  "name": "North Rocks Service Centre",
+  "suburb": "North Rocks",
+  "postcode": "2151",
+  "lat": -33.7689456,
+  "lng": 151.0283822
+ },
+ {
+  "id": 98,
+  "name": "Nowra Service NSW Centre",
+  "suburb": "South Nowra",
+  "postcode": "2541",
+  "lat": -34.9145891,
+  "lng": 150.5983868
+ },
+ {
+  "id": 99,
+  "name": "Nyngan Service NSW Centre",
+  "suburb": "Nyngan",
+  "postcode": "2825",
+  "lat": -31.56342,
+  "lng": 147.1974
+ },
+ {
+  "id": 100,
+  "name": "Orange Service NSW Centre",
+  "suburb": "Orange",
+  "postcode": "2800",
+  "lat": -33.2861,
+  "lng": 149.101047
+ },
+ {
+  "id": 102,
+  "name": "Parkes Service NSW Centre",
+  "suburb": "Parkes",
+  "postcode": "2870",
+  "lat": -33.135055,
+  "lng": 148.176383
+ },
+ {
+  "id": 104,
+  "name": "Penrith Service NSW Centre",
+  "suburb": "Penrith",
+  "postcode": "2750",
+  "lat": -33.753996,
+  "lng": 150.700428
+ },
+ {
+  "id": 105,
+  "name": "Port Macquarie Service NSW Centre",
+  "suburb": "Port Macquarie",
+  "postcode": "2444",
+  "lat": -31.44703874,
+  "lng": 152.8936605
+ },
+ {
+  "id": 106,
+  "name": "Queanbeyan Service NSW Centre",
+  "suburb": "Queanbeyan",
+  "postcode": "2620",
+  "lat": -35.337498,
+  "lng": 149.248532
+ },
+ {
+  "id": 107,
+  "name": "Raymond Terrace Service NSW Centre",
+  "suburb": "Raymond Terrace",
+  "postcode": "2324",
+  "lat": -32.76335018,
+  "lng": 151.7408115
+ },
+ {
+  "id": 382,
+  "name": "Revesby Service NSW Centre",
+  "suburb": "Revesby",
+  "postcode": "2212",
+  "lat": -33.9515281,
+  "lng": 151.0138233
+ },
+ {
+  "id": 108,
+  "name": "Richmond Service NSW Centre",
+  "suburb": "Richmond",
+  "postcode": "2753",
+  "lat": -33.597088,
+  "lng": 150.752779
+ },
+ {
+  "id": 109,
+  "name": "Rockdale Service NSW Centre",
+  "suburb": "Rockdale",
+  "postcode": "2216",
+  "lat": -33.95838499,
+  "lng": 151.141758
+ },
+ {
+  "id": 421,
+  "name": "Roselands Service NSW Centre",
+  "suburb": "Roselands",
+  "postcode": "2196",
+  "lat": -33.9336256,
+  "lng": 151.0673708
+ },
+ {
+  "id": 96,
+  "name": "Ryde Service NSW Centre",
+  "suburb": "North Ryde",
+  "postcode": "2113",
+  "lat": -33.786326,
+  "lng": 151.1194576
+ },
+ {
+  "id": 241,
+  "name": "Silverwater Service NSW Centre",
+  "suburb": "Silverwater",
+  "postcode": "2128",
+  "lat": -33.828515,
+  "lng": 151.048164
+ },
+ {
+  "id": 113,
+  "name": "Singleton Service NSW Centre",
+  "suburb": "Singleton",
+  "postcode": "2330",
+  "lat": -32.563514,
+  "lng": 151.168463
+ },
+ {
+  "id": 114,
+  "name": "Springwood Service NSW Centre",
+  "suburb": "Springwood",
+  "postcode": "2777",
+  "lat": -33.699714,
+  "lng": 150.567182
+ },
+ {
+  "id": 561,
+  "name": "St Marys Testing Centre",
+  "suburb": "St Marys",
+  "postcode": "2760",
+  "lat": -33.7788112,
+  "lng": 150.7707013
+ },
+ {
+  "id": 116,
+  "name": "Tamworth Service NSW Centre",
+  "suburb": "Tamworth",
+  "postcode": "2340",
+  "lat": -31.09436387,
+  "lng": 150.9342353
+ },
+ {
+  "id": 117,
+  "name": "Taree Service NSW Centre",
+  "suburb": "Taree",
+  "postcode": "2430",
+  "lat": -31.910578,
+  "lng": 152.463407
+ },
+ {
+  "id": 281,
+  "name": "Toronto Service NSW Centre",
+  "suburb": "Toronto",
+  "postcode": "2283",
+  "lat": -33.01314,
+  "lng": 151.59432
+ },
+ {
+  "id": 122,
+  "name": "Toukley Service NSW Centre",
+  "suburb": "Toukley",
+  "postcode": "2263",
+  "lat": -33.266979,
+  "lng": 151.549181
+ },
+ {
+  "id": 140,
+  "name": "Tuggerah Service NSW Centre",
+  "suburb": "Tuggerah",
+  "postcode": "2259",
+  "lat": -33.308739,
+  "lng": 151.4201174
+ },
+ {
+  "id": 123,
+  "name": "Tumut Service NSW Centre",
+  "suburb": "Tumut",
+  "postcode": "2720",
+  "lat": -35.30358,
+  "lng": 148.22682
+ },
+ {
+  "id": 54,
+  "name": "Tuncurry Service NSW Centre",
+  "suburb": "Tuncurry",
+  "postcode": "2428",
+  "lat": -32.1741063,
+  "lng": 152.4971142
+ },
+ {
+  "id": 124,
+  "name": "Tweed Heads Service NSW Centre",
+  "suburb": "Tweed Heads",
+  "postcode": "2485",
+  "lat": -28.1719897,
+  "lng": 153.541776
+ },
+ {
+  "id": 125,
+  "name": "Ulladulla Service NSW Centre",
+  "suburb": "Ulladulla",
+  "postcode": "2539",
+  "lat": -35.363263,
+  "lng": 150.472206
+ },
+ {
+  "id": 127,
+  "name": "Wagga Wagga Service NSW Centre",
+  "suburb": "Wagga Wagga",
+  "postcode": "2650",
+  "lat": -35.119503,
+  "lng": 147.363559
+ },
+ {
+  "id": 128,
+  "name": "Walgett Service NSW Centre",
+  "suburb": "Walgett",
+  "postcode": "2832",
+  "lat": -30.023384,
+  "lng": 148.116997
+ },
+ {
+  "id": 129,
+  "name": "Wallsend Service NSW Centre",
+  "suburb": "Wallsend",
+  "postcode": "2287",
+  "lat": -32.90313097,
+  "lng": 151.6672573
+ },
+ {
+  "id": 130,
+  "name": "Warners Bay Service NSW Centre",
+  "suburb": "Warners Bay",
+  "postcode": "2282",
+  "lat": -32.9644408,
+  "lng": 151.6544473
+ },
+ {
+  "id": 126,
+  "name": "Warrawong Service NSW Centre",
+  "suburb": "Warrawong",
+  "postcode": "2502",
+  "lat": -34.494811,
+  "lng": 150.889455
+ },
+ {
+  "id": 131,
+  "name": "Warriewood Service NSW Centre",
+  "suburb": "Warriewood",
+  "postcode": "2102",
+  "lat": -33.697072,
+  "lng": 151.295769
+ },
+ {
+  "id": 132,
+  "name": "Wauchope Service NSW Centre",
+  "suburb": "Wauchope",
+  "postcode": "2446",
+  "lat": -31.46942,
+  "lng": 152.71327
+ },
+ {
+  "id": 133,
+  "name": "Wellington Service NSW Centre",
+  "suburb": "Wellington",
+  "postcode": "2820",
+  "lat": -32.55096191,
+  "lng": 148.9415228
+ },
+ {
+  "id": 134,
+  "name": "Wentworth Service NSW Centre",
+  "suburb": "Wentworth",
+  "postcode": "2648",
+  "lat": -34.10682358,
+  "lng": 141.9172525
+ },
+ {
+  "id": 135,
+  "name": "West Wyalong Service NSW Centre",
+  "suburb": "West Wyalong",
+  "postcode": "2671",
+  "lat": -33.9199167,
+  "lng": 147.1952684
+ },
+ {
+  "id": 136,
+  "name": "Wetherill Park Service NSW Centre",
+  "suburb": "Wetherill Park",
+  "postcode": "2164",
+  "lat": -33.85069644,
+  "lng": 150.8984322
+ },
+ {
+  "id": 141,
+  "name": "Yass Service NSW Centre",
+  "suburb": "Yass",
+  "postcode": "2582",
+  "lat": -34.8238,
+  "lng": 148.90727
+ },
+ {
+  "id": 142,
+  "name": "Young Service NSW Centre",
+  "suburb": "Young",
+  "postcode": "2594",
+  "lat": -34.3122141,
+  "lng": 148.2961003
+ }
+]
