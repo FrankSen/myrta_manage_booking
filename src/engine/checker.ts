@@ -77,7 +77,7 @@ export async function checkStudent(studentId: number, deps: CheckDeps): Promise<
         await deps.dropSession(studentId);
         continue;
       }
-      return handleError(student, err, deps);
+      return reportError(student, err, deps);
     }
   }
 }
@@ -126,7 +126,7 @@ async function runRound(student: Student, deps: CheckDeps): Promise<CheckOutcome
 
     if (exact.length > 0) {
       exact.sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
-      return rebook(student, exact[0]!, session, deps);
+      return rebookSlot(student, exact[0]!, session, deps);
     }
     for (const { slot, notes } of near) {
       const offerId = repo.addOffer({ studentId: student.id, centreId: slot.centreId, date: slot.date, time: slot.time, notes }, clock.now());
@@ -162,7 +162,7 @@ function maxDate(a: LocalDate, b: LocalDate): LocalDate {
 }
 
 /** 完全符合的考位：走到确认页；自动改约开启才点 Finish，并用重新读取预约的结果核实 */
-async function rebook(student: Student, slot: Slot, session: SiteSession, deps: CheckDeps): Promise<CheckOutcome> {
+export async function rebookSlot(student: Student, slot: Slot, session: SiteSession, deps: CheckDeps): Promise<CheckOutcome> {
   const { repo, clock } = deps;
   const centre = deps.centres.get(slot.centreId)!;
 
@@ -216,7 +216,7 @@ function stopStudent(student: Student, reason: string, deps: CheckDeps): CheckOu
   return 'stop';
 }
 
-async function handleError(student: Student, err: unknown, deps: CheckDeps): Promise<CheckOutcome> {
+export async function reportError(student: Student, err: unknown, deps: CheckDeps): Promise<CheckOutcome> {
   const { repo, clock } = deps;
   const message = err instanceof Error ? err.message : String(err);
   const kind: SiteErrorKind = err instanceof SiteError ? err.kind : 'timeout';
