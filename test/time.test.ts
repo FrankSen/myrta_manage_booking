@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import {
-  addDays, diffDays, minutesOf, mondayOf, parseSiteDate, parseSlotTime, sydneyInstant, weekdayKey,
+  addDays, diffDays, minutesOf, mondayOf, parseSiteDate, parseSlotTime, sydneyDateOf, sydneyInstant, weekdayKey,
 } from '../src/domain/time.ts';
 
 describe('sydneyInstant', () => {
@@ -46,5 +46,16 @@ describe('日期运算', () => {
   });
   test('minutesOf', () => {
     expect(minutesOf('08:30')).toBe(510);
+  });
+});
+
+describe('sydneyDateOf', () => {
+  test('UTC 的前一天晚上，悉尼已经是第二天', () => {
+    expect(sydneyDateOf(Date.UTC(2026, 11, 29, 14, 0))).toBe('2026-12-30'); // 14:00Z = 01:00 +11
+    expect(sydneyDateOf(Date.UTC(2026, 11, 29, 12, 59))).toBe('2026-12-29'); // 23:59 +11
+  });
+  test('与 sydneyInstant 互为逆运算', () => {
+    expect(sydneyDateOf(sydneyInstant('2026-10-04', '00:30'))).toBe('2026-10-04');
+    expect(sydneyDateOf(sydneyInstant('2026-06-30', '23:59'))).toBe('2026-06-30');
   });
 });

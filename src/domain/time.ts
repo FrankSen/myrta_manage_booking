@@ -37,6 +37,15 @@ export function sydneyInstant(date: LocalDate, time: LocalTime): number {
   return guess - tzOffsetMs(first);
 }
 
+/** 某个 UTC 时刻对应的悉尼本地日期 */
+export function sydneyDateOf(utcMs: number): LocalDate {
+  const p: Record<string, string> = {};
+  for (const part of fmt.formatToParts(new Date(utcMs))) {
+    if (part.type !== 'literal') p[part.type] = part.value;
+  }
+  return `${p.year}-${p.month}-${p.day}`;
+}
+
 export function minutesOf(time: LocalTime): number {
   const [h, m] = time.split(':').map(Number) as [number, number];
   return h * 60 + m;
