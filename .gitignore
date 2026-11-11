@@ -1,0 +1,24 @@
+# 含学员个人信息的截图和原始资料，不入库
+*.jpg
+*.jpeg
+*.png
+!docs/diagrams/*.png
+
+# 依赖与构建产物
+node_modules/
+dist/
+out/
+release/
+coverage/
+
+# 本地数据与密钥
+.env
+.env.*
+*.sqlite
+*.db
+data/local/
+browser-profile/
+
+# 系统文件
+.DS_Store
+Thumbs.db
