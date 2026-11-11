@@ -83,6 +83,16 @@ export function diffDays(a: LocalDate, b: LocalDate): number {
   return Math.round((Date.UTC(by, bm - 1, bd) - Date.UTC(ay, am - 1, ad)) / DAY_MS);
 }
 
+/**
+ * 考位格子的 id 里的时间：12 小时制、小时不补零、没有冒号。
+ * 08:00 → 800，11:30 → 1130，12:15 → 1215，15:00 → 300，13:15 → 115
+ */
+export function slotCellTime(time: LocalTime): string {
+  const [h, m] = time.split(':').map(Number) as [number, number];
+  const hour12 = h % 12 === 0 ? 12 : h % 12;
+  return `${hour12}${String(m).padStart(2, '0')}`;
+}
+
 /** 星期几，用于拼考位格子的 id，如 'thu' */
 export function weekdayKey(date: LocalDate): 'sun' | 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' {
   const [y, m, d] = date.split('-').map(Number) as [number, number, number];

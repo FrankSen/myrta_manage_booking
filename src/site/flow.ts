@@ -1,5 +1,5 @@
 import type { Page } from 'playwright-core';
-import { addDays, mondayOf, weekdayKey, parseSiteDate } from '../domain/time.ts';
+import { addDays, mondayOf, parseSiteDate, slotCellTime, weekdayKey } from '../domain/time.ts';
 import type { BookingInfo, LocalDate, Slot } from '../domain/types.ts';
 import { launchBrowser, type BrowserHandle } from './browser.ts';
 import { SiteError } from './errors.ts';
@@ -7,7 +7,8 @@ import { detectPage, hasNoTimeslotsMessage, parseBookingDetails, parseTimeslots,
 import type { SiteSession } from './session.ts';
 
 const HOME = 'https://www.myrta.com/';
-const NAV_TIMEOUT = 40_000;
+/** 站点有时很慢（实测首页 DOMContentLoaded 要 40 秒），超时要放宽；不等整页 load，只等文档可用 */
+const NAV_TIMEOUT = 90_000;
 
 export interface FlowOptions {
   profileDir: string;
@@ -48,7 +49,7 @@ export class BrowserSession implements SiteSession {
     await this.assertNotBlocked(page);
     // 站点慢的时候，正文先出来，链接要过一会儿才有，所以要等
     let href: string | null = null;
-    for (let i = 0; i < 30 && !href; i++) {
+    for (let i = 0; i < 60 && !href; i++) {
       href = await page.evaluate(() => {
         const a = Array.from(document.querySelectorAll('a')).find((x) => /^\s*Manage booking\s*$/i.test(x.textContent ?? ''));
         return a ? (a as HTMLAnchorElement).href : null;
@@ -63,7 +64,7 @@ export class BrowserSession implements SiteSession {
     const idBox = page.locator('#widget_input_bookingId');
     const nameBox = page.locator('#widget_input_familyName');
     try {
-      await idBox.waitFor({ state: 'visible', timeout: 20_000 });
+      await idBox.waitFor({ state: 'visible', timeout: 60_000 });
     } catch {
       throw new SiteError('widgets_missing', '登录页的输入框没有出现（页面控件没有初始化）');
     }
@@ -77,11 +78,11 @@ export class BrowserSession implements SiteSession {
     await page.locator('#searchBookingCriteria').getByRole('button', { name: /continue/i }).click();
 
     try {
-      await page.waitForURL(/tbs-change-main/, { timeout: 30_000 });
+      await page.waitForURL(/tbs-change-main/, { timeout: 90_000, waitUntil: 'domcontentloaded' });
     } catch {
       throw await this.explainLoginFailure(page);
     }
-    await page.waitForLoadState('load');
+    await page.waitForLoadState('domcontentloaded');
     this.loggedIn = true;
     return this.readSummary(page);
   }
@@ -117,7 +118,7 @@ export class BrowserSession implements SiteSession {
     await this.expectKind(page, 'choose_time');
     await this.goToWeek(page, slot.date);
 
-    const id = `#rms_${weekdayKey(slot.date)}_${slot.time.replace(':', '').replace(/^0/, '')}`;
+    const id = `#rms_${weekdayKey(slot.date)}_${slotCellTime(slot.time)}`;
     const cell = page.locator(`${id} a`);
     if ((await cell.count()) === 0 || !(await cell.first().getAttribute('class'))?.includes('available')) {
       throw new SiteError('unknown_page', `考位 ${slot.date} ${slot.time} 现在不可约`);
@@ -158,15 +159,35 @@ export class BrowserSession implements SiteSession {
   /** 从"查看预约"页出发：选考点页 → 选时间页。期望日期设为 from，直接定位到那一周 */
   private async openChooseTime(page: Page, centreId: number, from: LocalDate): Promise<void> {
     if (!(await this.tryReturnToMain(page))) throw new SiteError('unknown_page', '无法回到"查看预约"页');
-    await page.getByRole('link', { name: /change location/i }).first().click();
-    await page.waitForLoadState('load');
+    // "Change location" 是 Dojo 按钮不是链接，控件初始化后才会出现
+    const changeBtn = page.locator('#changeLocationButton_label');
+    try {
+      await changeBtn.waitFor({ state: 'visible', timeout: 60_000 });
+    } catch {
+      throw new SiteError('unknown_page', '"查看预约"页上找不到 Change location 按钮');
+    }
+    await Promise.all([
+      page.waitForLoadState('domcontentloaded', { timeout: NAV_TIMEOUT }).catch(() => {}),
+      changeBtn.click(),
+    ]);
+    await page.waitForLoadState('domcontentloaded', { timeout: NAV_TIMEOUT }).catch(() => {});
+    await page.waitForTimeout(1500);
     await this.expectKind(page, 'choose_location');
 
+    // 期望日期决定站点从哪一周开始显示。必须像真人一样在输入框里键入；
+    // 用脚本直接给控件赋值不会生效，而且不报错，会静默落到当前预约所在的那一周
     const [y, m, d] = from.split('-') as [string, string, string];
-    await page.evaluate((v) => {
-      const w = (window as unknown as { dijit?: { byId(id: string): { set(k: string, v: string): void } | undefined } }).dijit?.byId('rms_batDateSel');
-      w?.set('displayedValue', v);
-    }, `${d}/${m}/${y}`);
+    const wanted = `${d}/${m}/${y}`;
+    const dateBox = page.locator('#widget_rms_batDateSel');
+    await dateBox.click();
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
+    await page.keyboard.type(wanted, { delay: 80 });
+    await page.keyboard.press('Tab');
+    await page.waitForTimeout(500);
+    const stored = await page.locator('input[name=preferredDateStr]').inputValue();
+    if (stored !== wanted) {
+      throw new SiteError('unknown_page', `期望日期没有生效：要设 ${wanted}，页面里是 "${stored}"`);
+    }
     await page.locator('#rms_batLocLocSel').check();
     await page.waitForTimeout(600);
     await page.selectOption('select[name=locationSelect]', String(centreId));
@@ -205,16 +226,16 @@ export class BrowserSession implements SiteSession {
 
   private async clickAndLoad(page: Page, selector: string): Promise<void> {
     await Promise.all([
-      page.waitForLoadState('load', { timeout: NAV_TIMEOUT }).catch(() => {}),
+      page.waitForLoadState('domcontentloaded', { timeout: NAV_TIMEOUT }).catch(() => {}),
       page.locator(selector).first().click(),
     ]);
-    await page.waitForLoadState('load', { timeout: NAV_TIMEOUT }).catch(() => {});
+    await page.waitForLoadState('domcontentloaded', { timeout: NAV_TIMEOUT }).catch(() => {});
     await page.waitForTimeout(1500);
   }
 
   private async go(page: Page, url: string): Promise<void> {
     try {
-      const res = await page.goto(url, { waitUntil: 'load', timeout: NAV_TIMEOUT });
+      const res = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT });
       if (res && res.status() === 403) throw new SiteError('blocked', '站点返回 403');
     } catch (err) {
       if (err instanceof SiteError) throw err;

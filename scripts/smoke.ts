@@ -24,7 +24,7 @@ const pause = () => new Promise((r) => setTimeout(r, PAUSE_MS));
 
 const profile = mkdtempSync(join(tmpdir(), 'smoke-'));
 const mk = (sub: string) => new BrowserSession({ profileDir: join(profile, sub), allowFinish: false });
-setTimeout(() => { console.error('总超时 6 分钟，退出'); process.exit(3); }, 6 * 60_000).unref();
+setTimeout(() => { console.error('总超时 12 分钟，退出'); process.exit(3); }, 12 * 60_000).unref();
 
 let s1 = mk('a');
 let failed = false;

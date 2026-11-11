@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import {
-  addDays, diffDays, minutesOf, mondayOf, parseSiteDate, parseSlotTime, sydneyDateOf, sydneyInstant, weekdayKey,
+  addDays, diffDays, minutesOf, mondayOf, parseSiteDate, parseSlotTime, slotCellTime, sydneyDateOf, sydneyInstant, weekdayKey,
 } from '../src/domain/time.ts';
 
 describe('sydneyInstant', () => {
@@ -58,4 +58,12 @@ describe('sydneyDateOf', () => {
     expect(sydneyDateOf(sydneyInstant('2026-10-04', '00:30'))).toBe('2026-10-04');
     expect(sydneyDateOf(sydneyInstant('2026-06-30', '23:59'))).toBe('2026-06-30');
   });
+});
+
+describe('slotCellTime（页面格子 id 用 12 小时制）', () => {
+  test.each([
+    ['08:00', '800'], ['08:15', '815'], ['09:45', '945'], ['11:30', '1130'],
+    ['12:00', '1200'], ['12:15', '1215'], ['13:15', '115'], ['14:00', '200'], ['15:00', '300'], ['17:45', '545'],
+    ['00:30', '1230'],
+  ])('%s → %s', (t, id) => expect(slotCellTime(t)).toBe(id));
 });
