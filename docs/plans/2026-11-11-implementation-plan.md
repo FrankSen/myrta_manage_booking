@@ -371,10 +371,10 @@ export class Service {
 
 ## 任务 9：装配、Windows 打包与文档
 
-**文件：** 创建 `src/main.ts`、`scripts/build-windows.ts`、`runtime/` 不入库、`docs/user-guide.md`
+**文件：** 创建 `src/main.ts`、`scripts/build.ts`、`runtime/` 不入库、`docs/user-guide.md`
 
 - [x] **步骤 1：`main.ts`：** 读 `runtime/settings.json`（可选，用 `mergeSettings` 合并）→ 打开数据库和密钥 → 创建 `Service` 和界面服务 → 打开界面窗口 → 处理退出信号，关闭所有浏览器。启动时先检查是否已有实例在运行（锁文件），避免重复启动重复访问站点。
-- [x] **步骤 2：** 打包脚本（`node scripts/build-windows.ts`，输出 `release/`）：把 `src/`、`data/`、`node_modules`（只含生产依赖）、Windows 版 `node.exe` 放进一个文件夹，加 `启动.bat`。`node.exe` 从 `https://nodejs.org/dist/v24.14.0/node-v24.14.0-win-x64.zip` 下载。各源速度变化很大（2026-11-12 实测官方约 0.4–2MB/s，npmmirror 只有 20KB/s，前一天 npmmirror 约 8MB/s），所以脚本依次尝试多个源、慢就换、支持续传。
+- [x] **步骤 2：** 打包脚本（`node scripts/build.ts`，输出 `release/`）：把 `src/`、`data/`、`node_modules`（只含生产依赖）、Windows 版 `node.exe` 放进一个文件夹，加 `启动.bat`。`node.exe` 从 `https://nodejs.org/dist/v24.14.0/node-v24.14.0-win-x64.zip` 下载。各源速度变化很大（2026-11-12 实测官方约 0.4–2MB/s，npmmirror 只有 20KB/s，前一天 npmmirror 约 8MB/s），所以脚本依次尝试多个源、慢就换、支持续传。
 - [x] **步骤 3：** 写 `docs/user-guide.md`：怎么安装、怎么新增学员、怎么看通知、常见问题（找不到浏览器、被拦截）。
 - [ ] **步骤 4：** 在 Windows 机器或虚拟机上完整走一遍。
 - [ ] **步骤 5：提交** `feat: 程序入口与 Windows 打包`

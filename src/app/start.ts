@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { readFileSync, rmSync } from 'node:fs';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { indexCentres } from '../domain/geo.ts';
 import type { BookingInfo, Centre } from '../domain/types.ts';
@@ -11,6 +11,7 @@ import { loadOrCreateKey } from '../storage/crypto.ts';
 import { openDb } from '../storage/db.ts';
 import { Repo } from '../storage/repo.ts';
 import { startUiServer, type UiServer } from '../ui/server.ts';
+import { QUIET_ARGS, realFindBrowser } from '../site/browser.ts';
 import { acquireLock } from './lock.ts';
 import { runtimePaths } from './paths.ts';
 import { loadSettings } from './settings-file.ts';
@@ -131,19 +132,12 @@ export async function startApp(opts: AppOptions): Promise<App> {
 
 /** 用 Chrome 的 --app 模式打开界面：没有地址栏，看起来像独立窗口 */
 function defaultOpenWindow(url: string, profileDir: string): ChildProcess | null {
-  const candidates =
-    process.platform === 'win32'
-      ? [
-          'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-          'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-          'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
-          'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
-        ]
-      : ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'];
-  for (const exe of candidates) {
-    if (!existsSync(exe)) continue;
-    return spawn(exe, [`--app=${url}`, `--user-data-dir=${profileDir}`, '--lang=zh-CN', '--no-first-run'], { stdio: 'ignore' });
+  let exe: string;
+  try {
+    exe = realFindBrowser();
+  } catch {
+    console.log(`没有找到 Chrome 或 Edge，请手动用浏览器打开：${url}`);
+    return null;
   }
-  console.log(`没有找到 Chrome 或 Edge，请手动用浏览器打开：${url}`);
-  return null;
+  return spawn(exe, [`--app=${url}`, `--user-data-dir=${profileDir}`, '--lang=zh-CN', '--no-first-run', '--no-default-browser-check', ...QUIET_ARGS], { stdio: 'ignore' });
 }

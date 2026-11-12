@@ -1,16 +1,31 @@
-// 生成 Windows 版：一个文件夹，双击"启动.bat"即可运行，不需要安装 Node。
-//   node scripts/build-windows.ts
-// 输出：release/myrta-rebook/ 和 release/myrta-rebook-<版本>-win-x64.zip
-// node.exe 用 curl 下载（Windows 10 以上和 macOS 都自带），用官方 SHASUMS256 校验，缓存在 release/cache/，下次不再下载。
+// 生成可直接运行的版本：一个文件夹，自带 Node，不需要安装。
+//   node scripts/build.ts            默认 win-x64
+//   node scripts/build.ts mac-arm64  Apple 芯片的 Mac
+//   node scripts/build.ts mac-x64    Intel 芯片的 Mac
+// 输出：release/<平台>/myrta-rebook/ 和 release/myrta-rebook-<版本>-<平台>.zip
+// Node 用 curl 下载（Windows 10 以上和 macOS 都自带），用官方 SHASUMS256 校验，缓存在 release/cache/，下次不再下载。
 import { createHash } from 'node:crypto';
-import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { zipDir } from './zip.ts';
 
 const NODE_VERSION = 'v24.14.0';
-const NODE_ZIP = `node-${NODE_VERSION}-win-x64.zip`;
+const TARGETS = {
+  'win-x64': { dist: `node-${NODE_VERSION}-win-x64`, ext: 'zip', files: ['node.exe', 'LICENSE'] },
+  'mac-arm64': { dist: `node-${NODE_VERSION}-darwin-arm64`, ext: 'tar.gz', files: ['bin/node', 'LICENSE'] },
+  'mac-x64': { dist: `node-${NODE_VERSION}-darwin-x64`, ext: 'tar.gz', files: ['bin/node', 'LICENSE'] },
+} as const;
+type TargetName = keyof typeof TARGETS;
+const targetName = (process.argv[2] ?? 'win-x64') as TargetName;
+const target = TARGETS[targetName];
+if (!target) {
+  console.error(`不认识的平台：${process.argv[2]}。可选：${Object.keys(TARGETS).join('、')}`);
+  process.exit(1);
+}
+const isWin = targetName.startsWith('win');
+const NODE_ZIP = `${target.dist}.${target.ext}`;
 // 各源速度差别大而且会变（镜像有时 8MB/s，有时只有 20KB/s），按顺序试，太慢就换下一个。
 // 内容完全相同，所以可以接着上一个源没下完的部分续传；最后统一用官方校验和核对
 const NODE_SOURCES = [
@@ -24,7 +39,7 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as { version: string };
 const releaseDir = join(root, 'release');
 const cacheDir = join(releaseDir, 'cache');
-const outDir = join(releaseDir, 'myrta-rebook');
+const outDir = join(releaseDir, targetName, 'myrta-rebook');
 const appDir = join(outDir, 'app');
 
 async function download(url: string, timeoutMs: number): Promise<Buffer> {
@@ -77,7 +92,7 @@ function productionPackages(): string[] {
     .map(([k]) => k);
 }
 
-// 换行用 CRLF；chcp 65001 让命令行按 UTF-8 显示中文。
+// Windows：换行用 CRLF；chcp 65001 让命令行按 UTF-8 显示中文。
 // 运行时数据放在 app 外面，升级时只替换 app 和 node 文件夹，学员数据不丢
 const BAT = [
   '@echo off',
@@ -89,30 +104,50 @@ const BAT = [
   '',
 ].join('\r\n');
 
-const zip = await nodeZip();
+// Mac：双击 .command 会在"终端"里运行。关掉终端窗口，软件随之退出
+const COMMAND = [
+  '#!/bin/bash',
+  'cd "$(dirname "$0")" || exit 1',
+  'export MYRTA_RUNTIME_DIR="$PWD/runtime"',
+  '# 从网上下载的文件会被系统标记隔离，自带的 node 会被拦住，这里去掉本文件夹里的标记',
+  'xattr -dr com.apple.quarantine . 2>/dev/null',
+  './node/node --disable-warning=ExperimentalWarning app/src/main.ts',
+  'code=$?',
+  'if [ $code -ne 0 ]; then read -r -p "按回车键关闭窗口" _; fi',
+  'exit $code',
+  '',
+].join('\n');
+
+const archiveFile = await nodeZip();
 rmSync(outDir, { recursive: true, force: true });
 mkdirSync(join(outDir, 'node'), { recursive: true });
 
-// Windows 10 以上和 macOS 自带的 tar 都能解 zip
+// Windows 10 以上和 macOS 自带的 tar 都能解 zip 和 tar.gz
 const tmp = join(cacheDir, 'unpack');
 rmSync(tmp, { recursive: true, force: true });
 mkdirSync(tmp, { recursive: true });
-execFileSync('tar', ['-xf', zip, '-C', tmp, `node-${NODE_VERSION}-win-x64/node.exe`, `node-${NODE_VERSION}-win-x64/LICENSE`]);
-cpSync(join(tmp, `node-${NODE_VERSION}-win-x64`), join(outDir, 'node'), { recursive: true });
+execFileSync('tar', ['-xf', archiveFile, '-C', tmp, ...target.files.map((f) => `${target.dist}/${f}`)]);
+for (const f of target.files) cpSync(join(tmp, target.dist, f), join(outDir, 'node', f.split('/').at(-1)!));
 rmSync(tmp, { recursive: true, force: true });
+if (!isWin) chmodSync(join(outDir, 'node', 'node'), 0o755);
 
 cpSync(join(root, 'src'), join(appDir, 'src'), { recursive: true });
 cpSync(join(root, 'data'), join(appDir, 'data'), { recursive: true, filter: (p) => !p.includes(`${join(root, 'data', 'local')}`) });
 cpSync(join(root, 'package.json'), join(appDir, 'package.json'));
 const pkgs = productionPackages();
 for (const p of pkgs) cpSync(join(root, p), join(appDir, p), { recursive: true });
-writeFileSync(join(outDir, '启动.bat'), BAT);
 const guide = join(root, 'docs', 'user-guide.md');
-// 加 BOM：旧版记事本没有 BOM 会把 UTF-8 当成 GBK，中文乱码
-if (existsSync(guide)) writeFileSync(join(outDir, '使用手册.txt'), '\uFEFF' + readFileSync(guide, 'utf8').replace(/\r?\n/g, '\r\n'));
+if (isWin) {
+  writeFileSync(join(outDir, '启动.bat'), BAT);
+  // 加 BOM：旧版记事本没有 BOM 会把 UTF-8 当成 GBK，中文乱码
+  if (existsSync(guide)) writeFileSync(join(outDir, '使用手册.txt'), '\uFEFF' + readFileSync(guide, 'utf8').replace(/\r?\n/g, '\r\n'));
+} else {
+  writeFileSync(join(outDir, '启动.command'), COMMAND, { mode: 0o755 });
+  if (existsSync(guide)) writeFileSync(join(outDir, '使用手册.txt'), readFileSync(guide, 'utf8'));
+}
 
 console.log(`已生成 ${outDir}（依赖：${pkgs.map((p) => p.replace('node_modules/', '')).join(', ')}）`);
 
-const archive = join(releaseDir, `myrta-rebook-${pkg.version}-win-x64.zip`);
+const archive = join(releaseDir, `myrta-rebook-${pkg.version}-${targetName}.zip`);
 const n = zipDir(outDir, archive);
 console.log(`已打包 ${archive}（${n} 个文件）`);

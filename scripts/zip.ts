@@ -6,6 +6,7 @@ import { crc32, deflateRawSync } from 'node:zlib';
  * 把一个文件夹打成 zip（文件夹本身作为顶层目录）。
  * 文件名按 UTF-8 写入并设置 UTF-8 标志位（0x800），Windows 解压中文文件名才不会乱码。
  * macOS 自带的 zip 和 ditto 都不设这个标志。不支持单个文件超过 4GB（这里用不到）。
+ * 同时记录 Unix 权限：Mac 版里的 node 和"启动.command"解压后要保持可执行。
  */
 export function zipDir(dir: string, out: string): number {
   const base = join(dir, '..');
@@ -22,13 +23,15 @@ export function zipDir(dir: string, out: string): number {
   const chunks: Buffer[] = [];
   const central: Buffer[] = [];
   let offset = 0;
-  // DOS 时间：固定为 2000-01-01，打包结果只取决于内容
-  const dosTime = 0;
-  const dosDate = ((2000 - 1980) << 9) | (1 << 5) | 1;
+  // DOS 时间用打包时的本地时间
+  const now = new Date();
+  const dosTime = (now.getHours() << 11) | (now.getMinutes() << 5) | Math.floor(now.getSeconds() / 2);
+  const dosDate = ((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate();
 
   for (const file of files) {
     const name = Buffer.from(relative(base, file).split(sep).join('/'), 'utf8');
     const data = readFileSync(file);
+    const mode = statSync(file).mode & 0o777;
     const crc = crc32(data);
     const deflated = deflateRawSync(data, { level: 9 });
     const useDeflate = deflated.length < data.length;
@@ -50,7 +53,8 @@ export function zipDir(dir: string, out: string): number {
 
     const cen = Buffer.alloc(46);
     cen.writeUInt32LE(0x02014b50, 0);
-    cen.writeUInt16LE(20, 4);
+    // 高字节 3 = Unix，这样解压程序才会读外部属性里的权限
+    cen.writeUInt16LE((3 << 8) | 20, 4);
     cen.writeUInt16LE(20, 6);
     cen.writeUInt16LE(0x800, 8);
     cen.writeUInt16LE(useDeflate ? 8 : 0, 10);
@@ -60,6 +64,8 @@ export function zipDir(dir: string, out: string): number {
     cen.writeUInt32LE(body.length, 20);
     cen.writeUInt32LE(data.length, 24);
     cen.writeUInt16LE(name.length, 28);
+    // 外部属性高 16 位放 Unix 文件类型和权限（普通文件 0o100000）
+    cen.writeUInt32LE(((0o100000 | mode) << 16) >>> 0, 38);
     cen.writeUInt32LE(offset, 42);
     central.push(cen, name);
     offset += local.length + name.length + body.length;

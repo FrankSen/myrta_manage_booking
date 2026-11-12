@@ -39,6 +39,25 @@ export function findBrowser(platform: string, exists: (p: string) => boolean, en
 
 export const realFindBrowser = (): string => findBrowser(process.platform, existsSync, process.env);
 
+/**
+ * 关掉浏览器自己的后台下载：组件更新、AI 模型、翻译、安全浏览列表、同步等。
+ * 不加时一个新资料目录一分多钟就会下载十几 MB，每添加一个学员都重来一遍。
+ * 只关后台联网，不改网页能看到的特征（不用 --disable-extensions 之类），以免被站点防护识别
+ */
+export const QUIET_ARGS: readonly string[] = [
+  '--disable-component-update',
+  '--disable-background-networking',
+  '--disable-sync',
+  '--disable-default-apps',
+  '--disable-domain-reliability',
+  '--disable-client-side-phishing-detection',
+  '--safebrowsing-disable-auto-update',
+  '--no-pings',
+  // GPU 着色器缓存：每个资料目录约 6MB，没有用
+  '--disable-gpu-shader-disk-cache',
+  '--disable-features=OptimizationGuideModelDownloading,OptimizationHintsFetching,OptimizationTargetPrediction,OptimizationHints,MediaRouter,Translate',
+];
+
 export function launchArgs(port: number, profileDir: string): string[] {
   return [
     `--remote-debugging-port=${port}`,
@@ -49,6 +68,8 @@ export function launchArgs(port: number, profileDir: string): string[] {
     '--accept-lang=en-AU,en',
     '--no-first-run',
     '--no-default-browser-check',
+    // MYRTA_QUIET=0 时不加（排查站点拦截用）
+    ...(process.env.MYRTA_QUIET === '0' ? [] : QUIET_ARGS),
     'about:blank',
   ];
 }

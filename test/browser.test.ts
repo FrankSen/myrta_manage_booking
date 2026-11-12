@@ -41,6 +41,19 @@ describe('启动参数', () => {
     expect(a).toContain('--user-data-dir=/tmp/p');
     expect(a).toContain('--no-first-run');
   });
+  test('关掉浏览器后台下载（组件更新、模型、同步）', () => {
+    const a = launchArgs(9333, '/tmp/p');
+    expect(a).toContain('--disable-component-update');
+    expect(a).toContain('--disable-background-networking');
+    expect(a.find((x) => x.startsWith('--disable-features='))).toContain('OptimizationGuideModelDownloading');
+    expect(a.at(-1)).toBe('about:blank');
+  });
+  test('不加会改变网页可见特征的参数', () => {
+    const a = launchArgs(9333, '/tmp/p');
+    for (const bad of ['--disable-extensions', '--headless', '--enable-automation', '--disable-blink-features']) {
+      expect(a.some((x) => x.startsWith(bad))).toBe(false);
+    }
+  });
   test('只监听本机，不开放调试端口给局域网', () => {
     expect(launchArgs(9333, '/tmp/p')).toContain('--remote-debugging-address=127.0.0.1');
   });

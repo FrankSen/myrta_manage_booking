@@ -43,7 +43,7 @@
 - 退出：先关浏览器让卡住的页面操作立即结束（最多再等 3 秒），退出中不再开新浏览器；处理 `SIGHUP`/`SIGBREAK`（Windows 关窗口）。`launchBrowser` 的 `close()` 会等进程真正退出。
 - 选时间页既没有考位数据也没有"没有考位"提示时，不再当作 0 个考位（之前一次实测读到 0 个，可能就是这个原因），等 20 秒仍没有就报错。
 - **会话复用已联网验证**：2 分钟一轮可一直复用；空闲 10 分钟仍可复用，空闲 15 分钟失效并自动重新登录。复用一轮约 35–65 秒。脚本 `scripts/session-reuse.ts`。
-- 打包：`node scripts/build-windows.ts` → `release/myrta-rebook/`（`启动.bat`、`node/node.exe`、`app/`、`使用手册.txt`）和 `release/myrta-rebook-0.1.0-win-x64.zip`（约 37MB）。node.exe 用 curl 下载，多个源依次尝试、续传，用官方 SHASUMS256 校验，缓存在 `release/cache/`。zip 用自己写的 `scripts/zip.ts`，给中文文件名设 UTF-8 标志（macOS 的 zip/ditto 都不设，Windows 会乱码）。
+- 打包：`node scripts/build.ts` → `release/myrta-rebook/`（`启动.bat`、`node/node.exe`、`app/`、`使用手册.txt`）和 `release/myrta-rebook-0.1.0-win-x64.zip`（约 37MB）。node.exe 用 curl 下载，多个源依次尝试、续传，用官方 SHASUMS256 校验，缓存在 `release/cache/`。zip 用自己写的 `scripts/zip.ts`，给中文文件名设 UTF-8 标志（macOS 的 zip/ditto 都不设，Windows 会乱码）。
 - 运行数据放在打包文件夹的 `runtime/`，在 `app/` 外面，升级时保留。
 - 使用手册 `docs/user-guide.md`。
 
