@@ -108,7 +108,8 @@ const pkgs = productionPackages();
 for (const p of pkgs) cpSync(join(root, p), join(appDir, p), { recursive: true });
 writeFileSync(join(outDir, '启动.bat'), BAT);
 const guide = join(root, 'docs', 'user-guide.md');
-if (existsSync(guide)) writeFileSync(join(outDir, '使用手册.txt'), readFileSync(guide, 'utf8').replace(/\r?\n/g, '\r\n'));
+// 加 BOM：旧版记事本没有 BOM 会把 UTF-8 当成 GBK，中文乱码
+if (existsSync(guide)) writeFileSync(join(outDir, '使用手册.txt'), '\uFEFF' + readFileSync(guide, 'utf8').replace(/\r?\n/g, '\r\n'));
 
 console.log(`已生成 ${outDir}（依赖：${pkgs.map((p) => p.replace('node_modules/', '')).join(', ')}）`);
 

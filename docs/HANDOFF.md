@@ -1,6 +1,6 @@
 # 交接说明（新会话先读这个）
 
-更新时间：2026-11-11 晚。项目目录：`/Users/smy/workstation/myrta_manage_booking`，已是 git 仓库（分支 main）。
+更新时间：2026-11-12。项目目录：`/Users/smy/workstation/myrta_manage_booking`，git 仓库。本次工作在分支 `feat/real-session`，尚未合并到 main。
 
 ## 项目是什么
 
@@ -31,18 +31,27 @@
 | 6 浏览器接管与站点流程 | 完成，已用 Du 的预约联网验证到确认页 |
 | 7 状态机与教练确认 | 完成 |
 | 8 本地界面与通知 | 完成 |
-| 9 装配 | **部分**：入口、单实例锁、配置文件完成；**`npm start` 仍用占位 `UnavailableSession`，没接真实 `BrowserSession`**；Windows 打包、使用手册没做 |
+| 9 装配 | **基本完成**：`npm start` 已接真实 `BrowserSession`（`allowFinish: false`）；Windows 打包脚本和使用手册完成。**没在真实 Windows 上跑过** |
 | 10 第一次真实改约 | **等教练通知**，`BrowserSession.finish()` 故意没实现 |
 
-191 个测试全部通过（`npm test`），类型检查通过（`npm run typecheck`）。
+203 个测试全部通过（`npm test`），类型检查通过（`npm run typecheck`）。
+
+## 2026-11-12 做了什么
+
+- `src/main.ts` 用 `new BrowserSession({ profileDir, allowFinish: false })`。每个学员的资料目录 `runtime/browser-profile/<id>`；添加学员的临时读取用 `probe` 目录，排队执行（同一目录不能开两个浏览器），每次读取前清空。
+- `startApp` 新增 `finishAvailable`：为 false 时，即使 `settings.json` 开了 `autoRebookEnabled` 也强制关闭并提示。否则提交会报错并被记成"可能已提交"。
+- 退出：先关浏览器让卡住的页面操作立即结束（最多再等 3 秒），退出中不再开新浏览器；处理 `SIGHUP`/`SIGBREAK`（Windows 关窗口）。`launchBrowser` 的 `close()` 会等进程真正退出。
+- 选时间页既没有考位数据也没有"没有考位"提示时，不再当作 0 个考位（之前一次实测读到 0 个，可能就是这个原因），等 20 秒仍没有就报错。
+- **会话复用已联网验证**：2 分钟一轮可一直复用；空闲 10 分钟仍可复用，空闲 15 分钟失效并自动重新登录。复用一轮约 35–65 秒。脚本 `scripts/session-reuse.ts`。
+- 打包：`node scripts/build-windows.ts` → `release/myrta-rebook/`（`启动.bat`、`node/node.exe`、`app/`、`使用手册.txt`）和 `release/myrta-rebook-0.1.0-win-x64.zip`（约 37MB）。node.exe 用 curl 下载，多个源依次尝试、续传，用官方 SHASUMS256 校验，缓存在 `release/cache/`。zip 用自己写的 `scripts/zip.ts`，给中文文件名设 UTF-8 标志（macOS 的 zip/ditto 都不设，Windows 会乱码）。
+- 运行数据放在打包文件夹的 `runtime/`，在 `app/` 外面，升级时保留。
+- 使用手册 `docs/user-guide.md`。
 
 ## 下一步（按顺序）
 
-1. **接真实站点操作**：改 `src/main.ts`，`openSession` 用 `new BrowserSession({ profileDir, allowFinish: false })`。每个学员一个固定 profile 目录（`runtime/browser-profile/<学员id>`），保留 cookie；添加学员时的临时读取用 `probe` 目录。同时检查 `src/app/start.ts` 的 `fetchCurrent`：它在登录读取后会关闭会话，注意与刷新用的会话分开。
-2. **会话复用要验证**：2 分钟间隔只有登录会话复用才可行（首次登录 70–95 秒）。`BrowserSession.login()` 已写了复用逻辑，但没有联网测过"保持多久"。
-3. **Windows 打包**（计划任务 9）：`src/`、`data/`、生产依赖、Windows 版 `node.exe` 放进一个文件夹，加 `启动.bat`。`node.exe` 从 `https://cdn.npmmirror.com/binaries/node/v24.14.0/node-v24.14.0-win-x64.zip` 下载（约 8MB/s，比官方源快）。
-4. **使用手册** `docs/user-guide.md`。
-5. 以上做完后告诉教练，等教练通知再做任务 10。
+1. **在真实 Windows 上走一遍**（计划任务 9 步骤 4）：解压 zip，双击 `启动.bat`，看界面能打开、中文不乱码、能找到 Chrome/Edge、添加学员能读到预约、关掉黑窗口后浏览器都关了。macOS 上验证不了这些。重点怀疑：`chcp 65001` 下中文显示；Windows 上没有 `LANG`，浏览器语言只靠 `--lang`/`--accept-lang`，要看 `navigator.languages`；关窗口时 SIGHUP 的收尾时间是否够。
+2. 把分支 `feat/real-session` 合并到 main（问用户）。
+3. 以上做完后告诉教练，等教练通知再做任务 10。
 
 ## 本机环境要点
 
@@ -74,8 +83,7 @@
 
 ## 尚未验证
 
-- 完成页的样子、改约次数限制和费用、原考位是否释放、会话超时时长（都要等第一次真实改约）。
-- 登录会话能保持多久。
+- 完成页的样子、改约次数限制和费用、原考位是否释放（都要等第一次真实改约）。
 - Akamai 对工具访问频率的容忍度，靠运行中观察和自动退避。
 - 在真实 Windows 上的 Chrome/Edge 启动。
 
