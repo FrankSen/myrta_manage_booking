@@ -72,6 +72,20 @@ function freePort(): Promise<number> {
   });
 }
 
+/** 等子进程退出，超时后强制结束 */
+export async function waitExit(child: ChildProcess, ms: number): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  const exited = new Promise<boolean>((r) => child.once('exit', () => r(true)));
+  const timer = new Promise<boolean>((r) => setTimeout(() => r(false), ms).unref());
+  if (await Promise.race([exited, timer])) return;
+  try {
+    child.kill('SIGKILL');
+  } catch {
+    // 已退出
+  }
+  await Promise.race([exited, new Promise((r) => setTimeout(r, 2000).unref())]);
+}
+
 export interface BrowserHandle {
   browser: Browser;
   page: Page;
@@ -125,6 +139,8 @@ export async function launchBrowser(profileDir: string, exe: string = realFindBr
     close: async () => {
       await browser!.close().catch(() => {});
       kill();
+      // 等进程真正退出：同一个资料目录马上会被重新使用，旧进程还在时新浏览器会把请求转交给它
+      await waitExit(child, 10_000);
     },
   };
 }

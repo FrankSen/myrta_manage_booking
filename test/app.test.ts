@@ -7,7 +7,7 @@ import { loadSettings } from '../src/app/settings-file.ts';
 import { DEFAULT_SETTINGS } from '../src/config/settings.ts';
 import { UnavailableSession } from '../src/site/unavailable.ts';
 import { FakeSession, SILVERWATER_NAME } from './helpers/fakes.ts';
-import { writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 
 const centresFile = new URL('../data/nsw-test-centres.json', import.meta.url).pathname;
 let app: App | null = null;
@@ -111,5 +111,82 @@ describe('配置文件', () => {
     const p = join(dir(), 's.json');
     writeFileSync(p, JSON.stringify({ autoRebookEnabled: 'yes' }));
     expect(() => loadSettings(p)).toThrow('autoRebookEnabled');
+  });
+});
+
+describe('添加学员时的临时读取', () => {
+  const settings = { ...DEFAULT_SETTINGS, hidden: { ...DEFAULT_SETTINGS.hidden, globalMinGapMs: 1 } };
+  const post = (a: App, bookingId: string) =>
+    fetch(`http://127.0.0.1:${a.ui.port}/api/students`, {
+      method: 'POST',
+      headers: { 'X-Token': a.ui.token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ label: 'A', bookingId, surname: 'Testsurname' }),
+    });
+
+  test('用 probe 目录，同时添加两个学员时排队，不会同时开两个浏览器；每次清空上一次的登录状态', async () => {
+    const d = dir();
+    let open = 0;
+    let maxOpen = 0;
+    const dirs: string[] = [];
+    app = await startApp({
+      runtimeDir: d, centresFile, openWindow: () => null, settings,
+      openSession: async (id, profileDir) => {
+        expect(id).toBeNull();
+        expect(existsSync(join(profileDir, 'leftover'))).toBe(false);
+        mkdirSync(profileDir, { recursive: true });
+        writeFileSync(join(profileDir, 'leftover'), 'x');
+        dirs.push(profileDir);
+        open++;
+        maxOpen = Math.max(maxOpen, open);
+        const s = new FakeSession();
+        const close = s.close.bind(s);
+        s.close = async () => {
+          await new Promise((r) => setTimeout(r, 20));
+          open--;
+          await close();
+        };
+        return s;
+      },
+    });
+    const [a, b] = await Promise.all([post(app, '1234567890'), post(app, '1234567891')]);
+    expect([a.status, b.status]).toEqual([201, 201]);
+    expect(maxOpen).toBe(1);
+    expect(dirs).toEqual([join(d, 'browser-profile', 'probe'), join(d, 'browser-profile', 'probe')]);
+  });
+
+  test('前一次读取失败，不影响下一次', async () => {
+    const d = dir();
+    let n = 0;
+    app = await startApp({
+      runtimeDir: d, centresFile, openWindow: () => null, settings,
+      openSession: async () => {
+        const s = new FakeSession();
+        if (n++ === 0) s.loginError = new Error('坏了');
+        return s;
+      },
+    });
+    expect((await post(app, '1234567890')).status).toBe(422);
+    expect((await post(app, '1234567890')).status).toBe(201);
+  });
+});
+
+describe('提交功能未启用', () => {
+  test('配置开启了自动改约也按关闭运行，并提示教练', async () => {
+    const d = dir();
+    writeFileSync(join(d, 'settings.json'), JSON.stringify({ autoRebookEnabled: true }));
+    const warnings: string[] = [];
+    app = await startApp({
+      runtimeDir: d, centresFile, openWindow: () => null, openSession: async () => new FakeSession(),
+      finishAvailable: false, warn: (m) => warnings.push(m),
+    });
+    expect(app.settings.autoRebookEnabled).toBe(false);
+    expect(warnings[0]).toContain('自动改约');
+  });
+
+  test('提交功能可用时，按配置开启', async () => {
+    const d = dir();
+    writeFileSync(join(d, 'settings.json'), JSON.stringify({ autoRebookEnabled: true }));
+    app = await startApp({ runtimeDir: d, centresFile, openWindow: () => null, openSession: async () => new FakeSession() });
+    expect(app.settings.autoRebookEnabled).toBe(true);
   });
 });

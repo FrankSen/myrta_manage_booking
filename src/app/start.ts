@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { indexCentres } from '../domain/geo.ts';
 import type { BookingInfo, Centre } from '../domain/types.ts';
@@ -23,6 +23,13 @@ export interface AppOptions {
   /** 打开界面窗口。默认用本机 Chrome/Edge 的 --app 模式；测试时传空函数 */
   openWindow?: (url: string, profileDir: string) => ChildProcess | null;
   settings?: Settings;
+  /**
+   * 站点会话能否真正点 Finish。为 false 时即使配置开启了自动改约也强制关闭，
+   * 否则提交会报错并被当成"可能已提交"，误导教练。默认 true（测试用假会话）
+   */
+  finishAvailable?: boolean;
+  /** 启动时给教练的提示，默认打印到控制台 */
+  warn?: (message: string) => void;
   clock?: Clock;
   port?: number;
 }
@@ -45,7 +52,11 @@ export async function startApp(opts: AppOptions): Promise<App> {
   };
 
   try {
-    const settings = opts.settings ?? loadSettings(paths.settings);
+    let settings = opts.settings ?? loadSettings(paths.settings);
+    if (opts.finishAvailable === false && settings.autoRebookEnabled) {
+      settings = { ...settings, autoRebookEnabled: false };
+      (opts.warn ?? console.warn)('配置里开启了自动改约，但当前版本还不能提交改约，已按"关闭"运行（只走到确认页）');
+    }
     const clock = opts.clock ?? realClock;
     const centreList = JSON.parse(readFileSync(opts.centresFile, 'utf8')) as Centre[];
     const centres = indexCentres(centreList);
@@ -54,6 +65,8 @@ export async function startApp(opts: AppOptions): Promise<App> {
     const repo = new Repo(db, loadOrCreateKey(paths.key));
     const limiter = new Limiter(clock, settings.hidden);
 
+    const probeDir = `${paths.browserProfiles}/probe`;
+    let probeQueue: Promise<unknown> = Promise.resolve();
     let ui: UiServer | null = null;
     const service = new Service({
       repo, clock, limiter, settings, centres,
@@ -67,14 +80,21 @@ export async function startApp(opts: AppOptions): Promise<App> {
         repo, service, centreList,
         autoRebookEnabled: settings.autoRebookEnabled,
         now: () => clock.now(),
-        fetchCurrent: async (bookingId, surname): Promise<BookingInfo> => {
-          await limiter.acquire();
-          const session = await opts.openSession(null, `${paths.browserProfiles}/probe`);
-          try {
-            return await session.login(bookingId, surname);
-          } finally {
-            await session.close();
-          }
+        // 临时读取共用一个 probe 目录，同一目录不能同时开两个浏览器，所以排队执行
+        fetchCurrent: (bookingId, surname): Promise<BookingInfo> => {
+          const run = probeQueue.then(async () => {
+            await limiter.acquire();
+            // 每次清空，避免上一个学员的登录状态带到这一个
+            rmSync(probeDir, { recursive: true, force: true });
+            const session = await opts.openSession(null, probeDir);
+            try {
+              return await session.login(bookingId, surname);
+            } finally {
+              await session.close();
+            }
+          });
+          probeQueue = run.catch(() => {});
+          return run;
         },
       },
       { port: opts.port },

@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest';
-import { findBrowser, launchArgs, launchEnv, languageOk } from '../src/site/browser.ts';
+import { spawn } from 'node:child_process';
+import { findBrowser, launchArgs, launchEnv, languageOk, waitExit } from '../src/site/browser.ts';
 
 describe('findBrowser', () => {
   const only = (...paths: string[]) => (p: string) => paths.includes(p);
@@ -54,5 +55,20 @@ describe('languageOk', () => {
   test('中文不行', () => {
     expect(languageOk(['zh-CN', 'zh'])).toBe(false);
     expect(languageOk([])).toBe(false);
+  });
+});
+
+describe('waitExit', () => {
+  test('进程正常退出：立即返回', async () => {
+    const child = spawn(process.execPath, ['-e', 'setTimeout(()=>{},50)']);
+    await waitExit(child, 5000);
+    expect(child.exitCode).toBe(0);
+  });
+  test('进程不退出：超时后强制结束', async () => {
+    const child = spawn(process.execPath, ['-e', 'process.on("SIGTERM",()=>{});setInterval(()=>{},1000)']);
+    const t = Date.now();
+    await waitExit(child, 300);
+    expect(child.signalCode).toBe('SIGKILL');
+    expect(Date.now() - t).toBeLessThan(3000);
   });
 });

@@ -1,6 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import { startApp } from './app/start.ts';
-import { UnavailableSession } from './site/unavailable.ts';
+import { BrowserSession } from './site/flow.ts';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 
@@ -9,8 +9,10 @@ try {
   app = await startApp({
     runtimeDir: process.env.MYRTA_RUNTIME_DIR ?? `${root}runtime`,
     centresFile: `${root}data/nsw-test-centres.json`,
-    // 站点操作模块接入前使用占位实现：不会访问任何网站
-    openSession: async () => new UnavailableSession(),
+    // 每个学员一个固定的浏览器资料目录，保留登录状态；添加学员时的临时读取用 probe 目录。
+    // 提交改约（Finish）要等第一次真实改约验证后才打开，见实现计划任务 10
+    openSession: async (_id, profileDir) => new BrowserSession({ profileDir, allowFinish: false }),
+    finishAvailable: false,
   });
 } catch (err) {
   // 给教练看的提示，不打印堆栈
