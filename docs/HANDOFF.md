@@ -47,6 +47,16 @@
 - 运行数据放在打包文件夹的 `runtime/`，在 `app/` 外面，升级时保留。
 - 使用手册 `docs/user-guide.md`。
 
+## 2026-11-12 下午做了什么（设计见 `docs/specs/2026-11-12-ui-time-mac-design.md`）
+
+- 界面改为驾考风格；"需要你处理"区；"等你确认"改名"已找到（未提交）"，可一键用系统浏览器打开 myrta.com。
+- 目标时间 15 分钟一档；新增指定时间（`Target.times`），接近按最近的指定时间算；最早时间联动最晚时间，反之不联动。
+- 浏览器加 `QUIET_ARGS` 关闭后台下载（`MYRTA_QUIET=0` 可去掉，用于排查）。已联网冒烟通过，站点不拦截。
+- `scripts/build.ts <win-x64|mac-arm64|mac-x64>`，输出 `release/<平台>/` 和 `release/myrta-rebook-<版本>-<平台>.zip`。Mac 包用 `启动.command`；zip 保留可执行权限。
+- Mac 包完整联网验证：解压（带隔离标记）→ 启动 → 添加 Du（69 秒）→ 设置指定时间 → 刷新一轮出 5 个接近考位 → "改到这个时间"走到确认页（45 秒，未提交）→ 关窗口信号后程序、学员浏览器、界面窗口全部关闭。之后全新会话核对 Du 预约未变。
+- 注意：VPN 断开时出口变成国内 IP，站点一律 403，不是参数问题。联网测试前先 `curl -s ipinfo.io/json` 看出口国家应为 AU。
+- 为什么必须开浏览器窗口：无界面（headless）浏览器和 Playwright 直接启动的浏览器都会被 Akamai 拦。窗口可以最小化。
+
 ## 下一步（按顺序）
 
 1. **在真实 Windows 上走一遍**（计划任务 9 步骤 4）：解压 zip，双击 `启动.bat`，看界面能打开、中文不乱码、能找到 Chrome/Edge、添加学员能读到预约、关掉黑窗口后浏览器都关了。macOS 上验证不了这些。重点怀疑：`chcp 65001` 下中文显示；Windows 上没有 `LANG`，浏览器语言只靠 `--lang`/`--accept-lang`，要看 `navigator.languages`；关窗口时 SIGHUP 的收尾时间是否够。
