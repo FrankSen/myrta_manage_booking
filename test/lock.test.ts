@@ -1,10 +1,10 @@
-import { mkdtempSync, existsSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, writeFileSync } from 'node:fs';
+import { tempDir } from './helpers/tmp.ts';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 import { acquireLock } from '../src/app/lock.ts';
 
-const tmp = () => join(mkdtempSync(join(tmpdir(), 'lock-')), 'sub', 'app.lock');
+const tmp = () => join(tempDir('lock-'), 'sub', 'app.lock');
 
 describe('单实例锁', () => {
   test('第一次能拿到，释放后锁文件消失', () => {

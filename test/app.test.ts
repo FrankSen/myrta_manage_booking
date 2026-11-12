@@ -1,4 +1,4 @@
-import { mkdtempSync, existsSync } from 'node:fs';
+import { mkdtempSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, test } from 'vitest';
@@ -11,11 +11,17 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 
 const centresFile = new URL('../data/nsw-test-centres.json', import.meta.url).pathname;
 let app: App | null = null;
+const made: string[] = [];
 afterEach(async () => {
   await app?.stop();
   app = null;
+  for (const d of made.splice(0)) rmSync(d, { recursive: true, force: true });
 });
-const dir = () => mkdtempSync(join(tmpdir(), 'app-'));
+const dir = () => {
+  const d = mkdtempSync(join(tmpdir(), 'app-'));
+  made.push(d);
+  return d;
+};
 
 describe('装配', () => {
   test('启动后界面可访问，数据文件和密钥都建在运行时目录里', async () => {
