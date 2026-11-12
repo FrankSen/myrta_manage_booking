@@ -14,6 +14,7 @@
     <h1>驾考改约助手</h1>
     <div class="sub">myrta.com · NSW 驾考考位自动刷新</div>
   </div>
+  <button id="btn-interval" class="sign-btn" title="刷新设置">⏱ <span id="interval-label"></span></button>
   <div class="sign" id="mode"></div>
   <button id="btn-notify" class="ghost" hidden>开启桌面通知</button>
 </header>
@@ -60,6 +61,21 @@
     </div>
     <p class="error" id="add-error"></p>
     <div class="row end"><button value="cancel" formnovalidate id="add-cancel">取消</button><button id="add-submit" value="ok" class="primary">添加并读取预约</button></div>
+  </form>
+</dialog>
+
+<dialog id="dlg-interval" class="wide">
+  <form method="dialog" id="form-interval">
+    <h3 id="interval-title">刷新设置</h3>
+    <p class="hint" id="interval-scope"></p>
+    <div class="interval-choices" id="interval-choices"></div>
+    <p class="interval-est" id="interval-est"></p>
+    <details class="explain" open>
+      <summary>为什么最小是 1 分钟，为什么不是越快越好</summary>
+      <div id="interval-help"></div>
+    </details>
+    <p class="error" id="interval-error"></p>
+    <div class="row end"><button value="cancel" formnovalidate>取消</button><button id="interval-submit" value="ok" class="primary">保存</button></div>
   </form>
 </dialog>
 

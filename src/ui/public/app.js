@@ -1,4 +1,5 @@
 import { checkTime, describeTime, onFromChange, onToChange, quarterTimes } from './time-options.js';
+import { countdown, estimate, minutesLabel, remaining } from './format.js';
 
 const token = new URLSearchParams(location.search).get('t') || '';
 const $ = (s) => document.querySelector(s);
@@ -6,6 +7,9 @@ const $$ = (s) => [...document.querySelectorAll(s)];
 let state = { centres: [], autoRebookEnabled: false };
 let centreById = new Map();
 let students = [];
+/** 服务器时间与本机时间之差，倒计时按服务器时间算 */
+let clockSkew = 0;
+const serverNow = () => Date.now() + clockSkew;
 
 async function api(method, path, body) {
   const res = await fetch(path, {
@@ -76,8 +80,52 @@ function studentActions(s) {
   else if (s.status !== 'done') b.push(`<button class="primary" data-act="start">${s.status === 'idle' ? '开始刷新' : '继续刷新'}</button>`);
   if (s.status === 'pending_confirm') b.push('<button class="warn" data-act="open-site">打开 myrta.com</button>');
   b.push('<button data-act="target">设置目标</button>');
+  if (s.status !== 'done') b.push('<button data-act="interval">刷新间隔</button>');
   b.push('<button class="danger" data-act="delete">删除</button>');
   return b.join('');
+}
+
+/** 刷新进度行：第几轮、下一轮倒计时、正在做什么、还能刷新多久、间隔 */
+function runLine(s) {
+  const parts = [];
+  const left = s.deadline ? s.deadline.at - serverNow() : 0;
+  const leftText = remaining(left);
+  const interval = `<span>间隔 <b>${minutesLabel(s.effectiveIntervalMs)}</b>${s.intervalMs ? '（单独设置）' : ''}</span>`;
+  if (s.status === 'running') {
+    parts.push(`<span>已查 <b>${s.rounds}</b> 轮</span>`);
+    const p = s.progress;
+    if (p && p.running) {
+      parts.push(`<span class="now">● 第 ${s.rounds + 1} 轮进行中${p.phase ? `：${esc(p.phase)}` : ''}</span>`);
+      parts.push('<span class="meter busy"><span></span></span>');
+    } else if (p && p.nextAt) {
+      const total = s.effectiveIntervalMs * 1.2;
+      const rest = p.nextAt - serverNow();
+      const pct = Math.min(100, Math.max(0, 100 - (rest / total) * 100));
+      parts.push(`<span>下一轮 <b data-next="${p.nextAt}">${countdown(rest)}</b> 后</span>`);
+      parts.push(`<span class="meter"><span data-meter="${p.nextAt}" data-total="${total}" style="width:${pct}%"></span></span>`);
+    }
+    parts.push(interval);
+    if (leftText) parts.push(`<span>还可刷新 <b>${leftText}</b></span>`);
+  } else if (s.status !== 'done') {
+    if (s.rounds > 0) parts.push(`<span>上次共查 <b>${s.rounds}</b> 轮</span>`);
+    parts.push(interval);
+    if (leftText) parts.push(`<span>还可刷新 <b>${leftText}</b></span>`);
+    else parts.push('<span class="warnline">目标日期已进入 48 小时内，无法再刷新</span>');
+  } else if (s.rounds > 0) {
+    parts.push(`<span>共查 <b>${s.rounds}</b> 轮后改约成功</span>`);
+  }
+  return parts.length ? `<div class="run">${parts.join('')}</div>` : '';
+}
+
+/** 每秒更新倒计时，不重新拉数据 */
+function tick() {
+  for (const el of $$('[data-next]')) el.textContent = countdown(Number(el.dataset.next) - serverNow());
+  for (const el of $$('[data-meter]')) {
+    const rest = Number(el.dataset.meter) - serverNow();
+    el.style.width = `${Math.min(100, Math.max(0, 100 - (rest / Number(el.dataset.total)) * 100))}%`;
+  }
+  // 倒计时走完，下一轮应该开始了，拉一次最新状态
+  if ($$('[data-next]').some((el) => Number(el.dataset.next) - serverNow() < -1500) && !reloading) void reload();
 }
 
 function renderStudents(list) {
@@ -94,9 +142,11 @@ function renderStudents(list) {
       <div class="head"><span class="name">${esc(s.label)}</span><span class="meta">Booking …${esc(s.bookingIdTail)}</span>
         <span class="status ${s.status}">${STATUS_TEXT[s.status] || s.status}</span></div>
       <div class="compare">
-        <div class="box"><div class="k">现有预约</div><div class="v">${esc(s.current.centreName)}</div><div class="s">${esc(fmtDate(s.current.date))} ${esc(s.current.time)}</div></div>
-        <div class="box"><div class="k">目标</div><div class="v">${esc(names)}</div><div class="s">${esc(dates)}　${esc(describeTime(t))}</div></div>
+        <div class="box cur"><div class="k">📄 现有预约</div><div class="v">${esc(s.current.centreName)}</div><div class="s">${esc(fmtDate(s.current.date))} ${esc(s.current.time)}</div></div>
+        <div class="arrow">→</div>
+        <div class="box goal"><div class="k">🎯 目标</div><div class="v">${esc(names)}</div><div class="s">${esc(dates)}　${esc(describeTime(t))}</div></div>
       </div>
+      ${runLine(s)}
       ${s.statusNote ? `<div class="note">${esc(s.statusNote)}</div>` : ''}
       <div class="actions">${studentActions(s)}</div></div>`;
   }).join('');
@@ -123,10 +173,16 @@ $('#log-student').onchange = renderLogs;
 $('#log-problems').onchange = renderLogs;
 $('#log-toggle').onclick = () => { logsCollapsed = !logsCollapsed; renderLogs(); };
 
+let reloading = false;
 async function reload() {
-  const [list, offers, l] = await Promise.all([api('GET', '/api/students'), api('GET', '/api/offers'), api('GET', '/api/logs')]);
-  students = list; logs = l;
-  renderStats(list, offers); renderTodo(list, offers); renderStudents(list); renderLogFilter(); renderLogs();
+  reloading = true;
+  try {
+    const [body, offers, l] = await Promise.all([api('GET', '/api/students'), api('GET', '/api/offers'), api('GET', '/api/logs')]);
+    clockSkew = body.now - Date.now();
+    students = body.students; logs = l;
+    const list = students;
+    renderStats(list, offers); renderTodo(list, offers); renderStudents(list); renderLogFilter(); renderLogs();
+  } finally { reloading = false; }
 }
 
 // ---------- 按钮 ----------
@@ -163,6 +219,7 @@ document.addEventListener('click', async (ev) => {
       if (act === 'pause') await api('POST', `/api/students/${id}/pause`);
       if (act === 'delete' && confirm(`确定删除学员"${s?.label}"吗？删除后不再刷新，记录也一并删除。`)) await api('DELETE', `/api/students/${id}`);
       if (act === 'target') return openTarget(s);
+      if (act === 'interval') return openInterval(s);
     }
   } catch (e) { alert(e.message); }
   await reload();
@@ -301,6 +358,58 @@ $('#form-target').addEventListener('submit', async (ev) => {
   catch (e) { $('#target-error').textContent = e.message; }
 });
 
+// ---------- 刷新设置 ----------
+
+/** null = 全局设置；否则是正在设置的学员 */
+let intervalFor = null;
+function renderIntervalLabel() {
+  $('#interval-label').textContent = `每 ${minutesLabel(state.intervalMs)}刷新`;
+}
+function showEstimate() {
+  const v = $('#form-interval').elements.interval.value;
+  const box = $('#interval-est');
+  if (v === 'global') {
+    box.textContent = `跟随全局设置（${minutesLabel(state.intervalMs)}）：${estimate(state.intervalMs / 60_000).text}`;
+    box.className = 'interval-est';
+    return;
+  }
+  const e = estimate(Number(v));
+  box.textContent = e.text + (e.risky ? '。这是最快的档位，被站点拦截的风险最大，建议只在短时间内使用。' : '。');
+  box.className = `interval-est ${e.risky ? 'risky' : ''}`;
+}
+function openInterval(s) {
+  intervalFor = s ?? null;
+  $('#interval-title').textContent = s ? `刷新间隔：${s.label}` : '刷新设置（所有学员）';
+  $('#interval-scope').textContent = s
+    ? '只对这个学员生效。一般跟随全局设置即可；比如这个学员不急，可以设长一点，把访问量留给别的学员。'
+    : '所有学员默认用这个间隔。改了立刻生效，正在等待的学员按新间隔重新计时。';
+  const current = s ? (s.intervalMs ? String(s.intervalMs / 60_000) : 'global') : String(state.intervalMs / 60_000);
+  const opts = (s ? [['global', '跟随全局']] : []).concat(state.intervalChoicesMin.map((m) => [String(m), `${m} 分钟`]));
+  $('#interval-choices').innerHTML = opts.map(([v, t]) =>
+    `<label><input type="radio" name="interval" value="${v}" ${v === current ? 'checked' : ''}> ${t}${v === '2' ? ' <span class="rec">推荐</span>' : ''}</label>`).join('');
+  $('#interval-help').innerHTML = state.intervalHelp.map((p) => `<p>${esc(p)}</p>`).join('');
+  $('#interval-error').textContent = '';
+  showEstimate();
+  $('#dlg-interval').showModal();
+}
+$('#interval-choices').onchange = showEstimate;
+$('#btn-interval').onclick = () => openInterval(null);
+$('#form-interval').addEventListener('submit', async (ev) => {
+  if (ev.submitter?.value !== 'ok') return;
+  ev.preventDefault();
+  const v = ev.target.elements.interval.value;
+  try {
+    if (intervalFor) await api('PUT', `/api/students/${intervalFor.id}/interval`, { ms: v === 'global' ? null : Number(v) * 60_000 });
+    else {
+      const r = await api('PUT', '/api/settings/interval', { ms: Number(v) * 60_000 });
+      state.intervalMs = r.intervalMs;
+      renderIntervalLabel();
+    }
+    $('#dlg-interval').close();
+    await reload();
+  } catch (e) { $('#interval-error').textContent = e.message; }
+});
+
 // ---------- 桌面通知与启动 ----------
 
 function notify(msg) {
@@ -315,11 +424,13 @@ try {
   const mode = $('#mode');
   mode.textContent = state.autoRebookEnabled ? '自动改约：已开启' : '自动改约：未开启 · 只走到确认页';
   mode.className = `sign ${state.autoRebookEnabled ? 'on' : 'off'}`;
+  renderIntervalLabel();
   $('#btn-notify').hidden = !('Notification' in window) || Notification.permission === 'granted';
   await reload();
   const es = new EventSource(`/api/events?t=${encodeURIComponent(token)}`);
   es.addEventListener('message', async (e) => { notify(JSON.parse(e.data)); await reload(); });
   setInterval(reload, 30000);
+  setInterval(tick, 1000);
 } catch (e) {
   document.body.innerHTML = `<p style="padding:20px">打不开：${esc(e.message)}。请用软件启动的窗口，不要手动改地址。</p>`;
 }
