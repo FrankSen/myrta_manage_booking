@@ -32,3 +32,7 @@ const shutdown = async () => {
 };
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
+// Windows 上直接关掉命令行窗口时 Node 收到的是 SIGHUP（只有几秒时间收尾）；Ctrl+Break 是 SIGBREAK。
+// 不处理的话，学员的浏览器窗口会留在后台继续开着
+process.on('SIGHUP', shutdown);
+if (process.platform === 'win32') process.on('SIGBREAK', shutdown);

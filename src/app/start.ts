@@ -67,6 +67,13 @@ export async function startApp(opts: AppOptions): Promise<App> {
 
     const probeDir = `${paths.browserProfiles}/probe`;
     let probeQueue: Promise<unknown> = Promise.resolve();
+    let probeSession: SiteSession | null = null;
+    const probeAbort = new AbortController();
+    // 退出时关掉正在读取的浏览器，否则它会一直等到页面超时
+    closers.push(async () => {
+      probeAbort.abort();
+      await probeSession?.close().catch(() => {});
+    });
     let ui: UiServer | null = null;
     const service = new Service({
       repo, clock, limiter, settings, centres,
@@ -83,13 +90,16 @@ export async function startApp(opts: AppOptions): Promise<App> {
         // 临时读取共用一个 probe 目录，同一目录不能同时开两个浏览器，所以排队执行
         fetchCurrent: (bookingId, surname): Promise<BookingInfo> => {
           const run = probeQueue.then(async () => {
-            await limiter.acquire();
+            await limiter.acquire(probeAbort.signal);
             // 每次清空，避免上一个学员的登录状态带到这一个
             rmSync(probeDir, { recursive: true, force: true });
+            if (probeAbort.signal.aborted) throw new Error('程序正在退出');
             const session = await opts.openSession(null, probeDir);
+            probeSession = session;
             try {
               return await session.login(bookingId, surname);
             } finally {
+              probeSession = null;
               await session.close();
             }
           });

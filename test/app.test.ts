@@ -196,3 +196,39 @@ describe('提交功能未启用', () => {
     expect(app.settings.autoRebookEnabled).toBe(true);
   });
 });
+
+describe('退出时', () => {
+  test('正在读取新学员的浏览器也会被关掉，不等页面超时', async () => {
+    const d = dir();
+    let closed = false;
+    let entered!: () => void;
+    const loginStarted = new Promise<void>((r) => (entered = r));
+    const a = await startApp({
+      runtimeDir: d, centresFile, openWindow: () => null,
+      openSession: async () => {
+        const s = new FakeSession();
+        s.login = () => {
+          entered();
+          return new Promise((_, reject) => {
+            s.close = async () => {
+              closed = true;
+              reject(new Error('browser has been closed'));
+            };
+          });
+        };
+        return s;
+      },
+    });
+    const req = fetch(`http://127.0.0.1:${a.ui.port}/api/students`, {
+      method: 'POST',
+      headers: { 'X-Token': a.ui.token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ label: 'A', bookingId: '1234567890', surname: 'Testsurname' }),
+    }).catch(() => null);
+    await loginStarted;
+    const t = Date.now();
+    await a.stop();
+    expect(Date.now() - t).toBeLessThan(1000);
+    expect(closed).toBe(true);
+    await req;
+  });
+});

@@ -96,6 +96,44 @@ describe('启动与暂停', () => {
   });
 });
 
+describe('退出', () => {
+  test('页面操作卡住时：先关浏览器让操作立即结束，不等页面超时；学员保持刷新中，重启后继续', async () => {
+    const t = setup();
+    const id = t.addStudent();
+    t.service.startStudent(id);
+    await t.clock.advance(0);
+    const s = t.sessions.get(id)!;
+    // 下一轮读考位时卡住，直到浏览器被关掉
+    let hung = false;
+    s.listSlots = () => {
+      hung = true;
+      return new Promise((_, reject) => {
+        s.close = async () => {
+          s.closed = true;
+          reject(new Error('Target page, context or browser has been closed'));
+        };
+      });
+    };
+    await t.clock.advance(3 * MIN);
+    expect(hung).toBe(true);
+
+    const started = Date.now();
+    await t.service.stopAll();
+    expect(Date.now() - started).toBeLessThan(1000);
+    expect(s.closed).toBe(true);
+    expect(t.repo.getStudent(id)!.status).toBe('running');
+  });
+
+  test('退出后不会再打开新的浏览器', async () => {
+    const t = setup();
+    const id = t.addStudent();
+    const offerId = t.repo.addOffer({ studentId: id, centreId: SILVERWATER, date: '2026-11-17', time: '13:00', notes: [] }, NOW)!;
+    await t.service.stopAll();
+    expect(await t.service.acceptOffer(offerId)).toBe('error');
+    expect(t.sessions.size).toBe(0);
+  });
+});
+
 describe('改约成功后', () => {
   test('学员不再被调度，会话关闭', async () => {
     const t = setup({ autoRebookEnabled: true });

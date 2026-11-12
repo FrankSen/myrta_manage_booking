@@ -84,11 +84,21 @@ export class Service {
     return this.withLock(offer.studentId, () => this.doAccept(offerId));
   }
 
+  /**
+   * 程序退出。先关浏览器：正在进行的页面操作会立刻失败结束，而不是等页面超时（最长 90 秒）。
+   * Windows 上直接关掉命令行窗口后只有几秒时间收尾。学员状态保持不变，重启后继续
+   */
   async stopAll(): Promise<void> {
     this.abort.abort();
     for (const id of this.scheduler.activeIds()) this.scheduler.stop(id);
-    await Promise.allSettled([...this.locks.values()]);
-    for (const id of [...this.sessions.keys()]) await this.dropSession(id);
+    await Promise.allSettled([...this.sessions.keys()].map((id) => this.dropSession(id)));
+    let timer: NodeJS.Timeout | undefined;
+    await Promise.race([
+      Promise.allSettled([...this.locks.values()]),
+      new Promise((r) => (timer = setTimeout(r, 3000))),
+    ]);
+    clearTimeout(timer);
+    await Promise.allSettled([...this.sessions.keys()].map((id) => this.dropSession(id)));
   }
 
   activeIds(): number[] {
@@ -150,6 +160,7 @@ export class Service {
       repo.setOfferState(offerId, 'accepted');
       await rebookSlot(student, slot, session, deps);
     } catch (err) {
+      if (this.abort.signal.aborted) return 'error';
       await reportError(student, err, deps);
       if (repo.getStudent(student.id)!.status !== 'running') this.scheduler.stop(student.id);
       return 'error';
@@ -166,9 +177,16 @@ export class Service {
   }
 
   private async getSession(id: number): Promise<SiteSession> {
+    // 退出过程中不再打开新的浏览器
+    if (this.abort.signal.aborted) throw new Error('程序正在退出');
     let s = this.sessions.get(id);
     if (!s) {
       s = await this.deps.openSession(id);
+      // 浏览器启动要十几秒，期间可能已经开始退出
+      if (this.abort.signal.aborted) {
+        await s.close().catch(() => {});
+        throw new Error('程序正在退出');
+      }
       this.sessions.set(id, s);
     }
     return s;
