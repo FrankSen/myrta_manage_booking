@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { detectPage, hasNoTimeslotsMessage, parseBookingDetails, parseTimeslots } from '../src/site/parse.ts';
+import { detectPage, hasNoTimeslotsMessage, hasTimeslotsData, parseBookingDetails, parseTimeslots } from '../src/site/parse.ts';
 
 const html = (json: string) => `<html><script>var a = 1;</script><script>
   var timeslots = ${json};
@@ -31,6 +31,11 @@ describe('parseTimeslots', () => {
   test('timeslots 内容损坏：抛错，调用方当作未知页面', () => {
     expect(() => parseTimeslots(html('{"ajaxresult": '))).toThrow();
   });
+});
+
+describe('hasTimeslotsData', () => {
+  test('有数据脚本', () => expect(hasTimeslotsData('<script>var timeslots = {}</script>')).toBe(true));
+  test('没有：可能没加载完，不能当作没有考位', () => expect(hasTimeslotsData('<html>Choose a time</html>')).toBe(false));
 });
 
 describe('hasNoTimeslotsMessage', () => {

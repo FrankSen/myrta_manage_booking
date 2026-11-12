@@ -44,6 +44,11 @@ function extractObject(text: string, start: number): string {
   throw new Error('timeslots 对象没有结束');
 }
 
+/** 页面里有没有考位数据脚本。没有时不能当作"没有考位"，可能是页面没加载完 */
+export function hasTimeslotsData(html: string): boolean {
+  return html.includes('var timeslots');
+}
+
 export function hasNoTimeslotsMessage(text: string): boolean {
   return /There are no timeslots available at this location/i.test(text);
 }

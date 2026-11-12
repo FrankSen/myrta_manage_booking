@@ -41,7 +41,7 @@ async function describePage(): Promise<string> {
   const kind = detectPage(text, page.url());
   // 只记录页面标题行和网址路径，不记录预约内容
   const firstLine = text.split('\n').map((x) => x.trim()).find((x) => /session|expired|timed? ?out|log ?in|sign ?in|error/i.test(x)) ?? '';
-  return `kind=${kind} path=${new URL(page.url()).pathname} hint="${firstLine.slice(0, 120)}"`;
+  return `kind=${kind} hint="${firstLine.slice(0, 120)}"`;
 }
 
 const from = addDays(sydneyDateOf(Date.now()), 3);
@@ -58,6 +58,7 @@ async function round(label: string): Promise<void> {
   const t2 = Date.now();
   const slots = await s.listSlots(CENTRE, from, to);
   log(`  读考点 ${CENTRE} 一周：${slots.length} 个考位（${((Date.now() - t2) / 1000).toFixed(0)}s），之后页面：${await describePage()}`);
+  log(`  各周：${JSON.stringify(s.lastListWeeks)}（范围 ${from} 至 ${to}）`);
   lastActive = Date.now();
 }
 

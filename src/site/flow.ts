@@ -3,7 +3,7 @@ import { addDays, mondayOf, parseSiteDate, slotCellTime, weekdayKey } from '../d
 import type { BookingInfo, LocalDate, Slot } from '../domain/types.ts';
 import { launchBrowser, type BrowserHandle } from './browser.ts';
 import { SiteError } from './errors.ts';
-import { detectPage, hasNoTimeslotsMessage, parseBookingDetails, parseTimeslots, type PageKind } from './parse.ts';
+import { detectPage, hasNoTimeslotsMessage, hasTimeslotsData, parseBookingDetails, parseTimeslots, type PageKind } from './parse.ts';
 import type { SiteSession } from './session.ts';
 
 const HOME = 'https://www.myrta.com/';
@@ -27,6 +27,8 @@ export class BrowserSession implements SiteSession {
   private pending: Slot | null = null;
   /** 最近一次 login() 是否复用了已有的登录（没有重新输入资料）。用于观察会话能保持多久 */
   lastLoginReused = false;
+  /** 最近一次 listSlots 每一周看到的情况，用于排查"读到 0 个考位"是真的没有还是读错了 */
+  lastListWeeks: { weekStart: LocalDate | null; total: number; available: number; inRange: number; noSlotsMessage: boolean }[] = [];
 
   constructor(opts: FlowOptions) {
     this.opts = opts;
@@ -97,18 +99,26 @@ export class BrowserSession implements SiteSession {
 
     const result: Slot[] = [];
     const seen = new Set<string>();
+    this.lastListWeeks = [];
     // 站点一次显示一周，一周一周往后翻，直到超过结束日期
     for (let guard = 0; guard < 20; guard++) {
-      const html = await page.content();
-      if (hasNoTimeslotsMessage(await page.innerText('body'))) break;
+      const html = await this.timeslotsHtml(page);
+      if (html === null) {
+        this.lastListWeeks.push({ weekStart: null, total: 0, available: 0, inRange: 0, noSlotsMessage: true });
+        break;
+      }
       const weekStart = parseSiteDate(await page.locator('#formTableWeekStarting').inputValue());
-      for (const s of parseTimeslots(html)) {
+      const raw = parseTimeslots(html);
+      let inRange = 0;
+      for (const s of raw) {
         if (!s.available || s.date < dateFrom || s.date > dateTo) continue;
+        inRange++;
         const key = `${s.date} ${s.time}`;
         if (seen.has(key)) continue;
         seen.add(key);
         result.push({ centreId, date: s.date, time: s.time });
       }
+      this.lastListWeeks.push({ weekStart, total: raw.length, available: raw.filter((s) => s.available).length, inRange, noSlotsMessage: false });
       if (addDays(weekStart, 7) > dateTo) break;
       await this.clickAndLoad(page, '#nextWeekButton');
       await this.expectKind(page, 'choose_time');
@@ -159,6 +169,20 @@ export class BrowserSession implements SiteSession {
   }
 
   // ---- 内部 ----
+
+  /**
+   * 取选时间页的 HTML。站点明确说没有考位时返回 null。
+   * 两样都没有说明页面还没加载完：等一会儿再看，仍然没有就报错，不能当作"没有考位"
+   */
+  private async timeslotsHtml(page: Page): Promise<string | null> {
+    for (let i = 0; i < 20; i++) {
+      const html = await page.content();
+      if (hasTimeslotsData(html)) return html;
+      if (hasNoTimeslotsMessage(await page.innerText('body').catch(() => ''))) return null;
+      await page.waitForTimeout(1000);
+    }
+    throw new SiteError('unknown_page', '选时间页上既没有考位数据，也没有"没有考位"的提示');
+  }
 
   /** 从"查看预约"页出发：选考点页 → 选时间页。期望日期设为 from，直接定位到那一周 */
   private async openChooseTime(page: Page, centreId: number, from: LocalDate): Promise<void> {
