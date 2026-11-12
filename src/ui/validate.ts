@@ -2,6 +2,8 @@ import type { Target } from '../domain/types.ts';
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
+/** 考位都是 15 分钟一档 */
+const QUARTER = /^([01]\d|2[0-3]):(00|15|30|45)$/;
 
 export class ValidationError extends Error {}
 
@@ -30,8 +32,19 @@ export function parseTarget(raw: unknown, knownCentreIds: ReadonlySet<number>): 
   if (!isRealDate(dateFrom) || !isRealDate(dateTo)) throw new ValidationError('日期格式应为 YYYY-MM-DD');
   if (dateFrom > dateTo) throw new ValidationError('开始日期不能晚于结束日期');
   if (!TIME.test(timeFrom) || !TIME.test(timeTo)) throw new ValidationError('时间格式应为 HH:MM');
-  if (timeFrom >= timeTo) throw new ValidationError('开始时间必须早于结束时间');
-  return { centreIds: [...new Set(centreIds)], dateFrom, dateTo, timeFrom, timeTo };
+  if (!QUARTER.test(timeFrom) || !QUARTER.test(timeTo)) throw new ValidationError('时间要按 15 分钟一档选（如 08:00、08:15）');
+  if (timeFrom > timeTo) throw new ValidationError('最早时间不能晚于最晚时间');
+  const target: Target = { centreIds: [...new Set(centreIds)], dateFrom, dateTo, timeFrom, timeTo };
+  if (o.times !== undefined) {
+    if (!Array.isArray(o.times)) throw new ValidationError('指定时间格式不对');
+    for (const t of o.times) {
+      if (typeof t !== 'string' || !TIME.test(t)) throw new ValidationError('指定时间格式应为 HH:MM');
+      if (!QUARTER.test(t)) throw new ValidationError(`指定时间要按 15 分钟一档选：${t}`);
+    }
+    const times = [...new Set(o.times as string[])].sort();
+    if (times.length > 0) target.times = times;
+  }
+  return target;
 }
 
 export interface NewStudentInput {

@@ -94,3 +94,37 @@ describe('容差可调', () => {
     expect(run(slot(ROSELANDS, '2026-11-17', '10:00'), tol).kind).toBe('near');
   });
 });
+
+describe('指定时间', () => {
+  const t: Target = { ...target, timeFrom: '09:00', timeTo: '12:00', times: ['08:00', '13:30'] };
+  const ev = (s: Slot) => evaluate(s, t, DEFAULT_TOLERANCE, centres, NOW);
+  test('等于某个指定时间：完全符合（忽略时间范围）', () => {
+    expect(ev(slot(SILVERWATER, '2026-11-17', '08:00')).kind).toBe('exact');
+    expect(ev(slot(SILVERWATER, '2026-11-17', '13:30')).kind).toBe('exact');
+  });
+  test('在时间范围内但不是指定时间：按最近的指定时间算偏差', () => {
+    const r = ev(slot(SILVERWATER, '2026-11-17', '10:00'));
+    expect(r.kind).toBe('none'); // 离 08:00 120 分钟，离 13:30 210 分钟
+    const r2 = ev(slot(SILVERWATER, '2026-11-17', '08:45'));
+    expect(r2.kind).toBe('near');
+    expect(r2.notes).toEqual(['与指定时间相差 45 分钟']);
+  });
+  test('取最近的指定时间', () => {
+    expect(ev(slot(SILVERWATER, '2026-11-17', '13:00')).notes).toEqual(['与指定时间相差 30 分钟']);
+  });
+  test('正好 60 分钟算接近，61 分钟不算', () => {
+    expect(ev(slot(SILVERWATER, '2026-11-17', '14:30')).kind).toBe('near');
+    expect(ev(slot(SILVERWATER, '2026-11-17', '14:31')).kind).toBe('none');
+  });
+  test('空数组按时间范围', () => {
+    expect(evaluate(slot(SILVERWATER, '2026-11-17', '10:00'), { ...target, times: [] }, DEFAULT_TOLERANCE, centres, NOW).kind).toBe('exact');
+  });
+});
+
+describe('最早等于最晚', () => {
+  test('只有这个时间完全符合', () => {
+    const t: Target = { ...target, timeFrom: '08:00', timeTo: '08:00' };
+    expect(evaluate(slot(SILVERWATER, '2026-11-17', '08:00'), t, DEFAULT_TOLERANCE, centres, NOW).kind).toBe('exact');
+    expect(evaluate(slot(SILVERWATER, '2026-11-17', '08:15'), t, DEFAULT_TOLERANCE, centres, NOW).kind).toBe('near');
+  });
+});

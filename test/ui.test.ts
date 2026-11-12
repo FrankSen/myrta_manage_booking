@@ -124,7 +124,11 @@ describe('目标校验', () => {
 
   test.each([
     ['结束日期早于开始日期', { ...goodTarget, dateFrom: '2026-11-20', dateTo: '2026-11-16' }],
-    ['开始时间不早于结束时间', { ...goodTarget, timeFrom: '12:00', timeTo: '12:00' }],
+    ['开始时间晚于结束时间', { ...goodTarget, timeFrom: '12:15', timeTo: '12:00' }],
+    ['时间不在 15 分钟档上', { ...goodTarget, timeFrom: '09:07' }],
+    ['指定时间不在 15 分钟档上', { ...goodTarget, times: ['09:00', '09:10'] }],
+    ['指定时间格式不对', { ...goodTarget, times: ['9am'] }],
+    ['指定时间不是数组', { ...goodTarget, times: '09:00' }],
     ['日期格式不对', { ...goodTarget, dateFrom: '16/11/2026' }],
     ['日期不存在', { ...goodTarget, dateFrom: '2026-02-30' }],
     ['时间格式不对', { ...goodTarget, timeFrom: '9am' }],
@@ -136,6 +140,28 @@ describe('目标校验', () => {
     const before = repo.getStudent(id)!.target;
     expect((await call('PUT', `/api/students/${id}/target`, bad)).status).toBe(400);
     expect(repo.getStudent(id)!.target).toEqual(before);
+  });
+
+  test('最早时间等于最晚时间：只要这一个时间，合法', async () => {
+    const { call, repo } = await setup();
+    const id = await create(call);
+    const t = { ...goodTarget, timeFrom: '08:00', timeTo: '08:00' };
+    expect((await call('PUT', `/api/students/${id}/target`, t)).status).toBe(200);
+    expect(repo.getStudent(id)!.target).toEqual(t);
+  });
+
+  test('指定时间：去重、排序后保存', async () => {
+    const { call, repo } = await setup();
+    const id = await create(call);
+    expect((await call('PUT', `/api/students/${id}/target`, { ...goodTarget, times: ['13:30', '08:00', '13:30'] })).status).toBe(200);
+    expect(repo.getStudent(id)!.target.times).toEqual(['08:00', '13:30']);
+  });
+
+  test('指定时间为空数组：按时间范围，不保存 times', async () => {
+    const { call, repo } = await setup();
+    const id = await create(call);
+    expect((await call('PUT', `/api/students/${id}/target`, { ...goodTarget, times: [] })).status).toBe(200);
+    expect(repo.getStudent(id)!.target).toEqual(goodTarget);
   });
 
   test('学员不存在：404', async () => {

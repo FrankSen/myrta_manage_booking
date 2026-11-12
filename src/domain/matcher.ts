@@ -21,6 +21,12 @@ export function minutesOutside(time: string, from: string, to: string): number {
   return 0;
 }
 
+/** 与最近一个指定时间相差多少分钟 */
+export function minutesFromNearest(time: string, times: readonly string[]): number {
+  const t = minutesOf(time);
+  return Math.min(...times.map((x) => Math.abs(minutesOf(x) - t)));
+}
+
 /** 日期超出目标日期范围多少天，范围内为 0 */
 export function daysOutside(date: string, from: string, to: string): number {
   if (date < from) return diffDays(date, from);
@@ -44,7 +50,8 @@ export function evaluate(
   if (!isBookable(slot, nowMs)) return NONE;
 
   const dateOut = daysOutside(slot.date, target.dateFrom, target.dateTo);
-  const timeOut = minutesOutside(slot.time, target.timeFrom, target.timeTo);
+  const byTimes = (target.times?.length ?? 0) > 0;
+  const timeOut = byTimes ? minutesFromNearest(slot.time, target.times!) : minutesOutside(slot.time, target.timeFrom, target.timeTo);
   const centreIsTarget = target.centreIds.includes(slot.centreId);
 
   if (dateOut === 0 && timeOut === 0 && centreIsTarget) {
@@ -57,7 +64,7 @@ export function evaluate(
   if (dateOut > 0) notes.push(`日期超出目标范围 ${dateOut} 天`);
 
   if (timeOut > tolerance.maxTimeMinutes) return NONE;
-  if (timeOut > 0) notes.push(`时间超出目标时间段 ${timeOut} 分钟`);
+  if (timeOut > 0) notes.push(byTimes ? `与指定时间相差 ${timeOut} 分钟` : `时间超出目标时间段 ${timeOut} 分钟`);
 
   if (!centreIsTarget) {
     const km = minDistanceKm(slot.centreId, target.centreIds, centres);

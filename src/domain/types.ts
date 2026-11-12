@@ -33,6 +33,8 @@ export interface Target {
   dateTo: LocalDate;
   timeFrom: LocalTime;
   timeTo: LocalTime;
+  /** 指定时间（方案 B）。非空时只认这几个时间，忽略 timeFrom/timeTo；为空或没有时按时间范围 */
+  times?: LocalTime[];
 }
 
 /** 判断"接近"的容差 */
