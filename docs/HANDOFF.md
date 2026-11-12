@@ -57,6 +57,14 @@
 - 注意：VPN 断开时出口变成国内 IP，站点一律 403，不是参数问题。联网测试前先 `curl -s ipinfo.io/json` 看出口国家应为 AU。
 - 为什么必须开浏览器窗口：无界面（headless）浏览器和 Playwright 直接启动的浏览器都会被 Akamai 拦。窗口可以最小化。
 
+## 2026-11-12 晚做了什么
+
+- 现有预约（浅灰蓝）和目标（浅绿）分色，中间加箭头。
+- 刷新间隔可调：全局（顶栏"⏱"按钮，写回 `runtime/settings.json` 的 `hidden.checkIntervalMs`）和学员单独（`students.interval_ms`，空表示跟随全局）。可选 1、2、3、5、10、15、30 分钟，最小 1 分钟，说明文字在 `src/config/interval.ts`。改了立即重新计时（`Scheduler.reschedule`）。
+- 学员卡片显示已查轮数（`students.rounds`，重新开始清零，程序重启后自动继续不清零）、下一轮倒计时、本轮阶段（`Service.progress`）、还可刷新多久（`refreshDeadline`，引擎停止判断也用它）。
+- 数据库加列由 `migrate()` 自动完成，旧数据库直接可用。
+- 联网验证（Mac 包）：真实一轮约 2 分钟（新资料目录首次登录约 60 秒 + 两个考点），轮数和倒计时正确；Du 预约未变。
+
 ## 下一步（按顺序）
 
 1. **在真实 Windows 上走一遍**（计划任务 9 步骤 4）：解压 zip，双击 `启动.bat`，看界面能打开、中文不乱码、能找到 Chrome/Edge、添加学员能读到预约、关掉黑窗口后浏览器都关了。macOS 上验证不了这些。重点怀疑：`chcp 65001` 下中文显示；Windows 上没有 `LANG`，浏览器语言只靠 `--lang`/`--accept-lang`，要看 `navigator.languages`；关窗口时 SIGHUP 的收尾时间是否够。
