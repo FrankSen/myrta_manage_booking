@@ -25,6 +25,8 @@ export class BrowserSession implements SiteSession {
   private loggedIn = false;
   /** 选定考位、停在确认页时，记录所选考位，防止 finish() 在没选位时被调用 */
   private pending: Slot | null = null;
+  /** 最近一次 login() 是否复用了已有的登录（没有重新输入资料）。用于观察会话能保持多久 */
+  lastLoginReused = false;
 
   constructor(opts: FlowOptions) {
     this.opts = opts;
@@ -38,10 +40,12 @@ export class BrowserSession implements SiteSession {
   async login(bookingId: string, surname: string): Promise<BookingInfo> {
     const page = await this.page();
     // 会话还有效：直接回到"查看预约"页，不用重新登录
+    this.lastLoginReused = false;
     if (this.loggedIn) {
-      const kind = await this.currentKind(page);
-      if (kind === 'main') return this.readSummary(page);
-      if (await this.tryReturnToMain(page)) return this.readSummary(page);
+      if (await this.tryReturnToMain(page)) {
+        this.lastLoginReused = true;
+        return this.readSummary(page);
+      }
       this.loggedIn = false;
     }
 
