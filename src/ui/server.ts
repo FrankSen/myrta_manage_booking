@@ -1,4 +1,5 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -18,6 +19,17 @@ export interface UiDeps {
   fetchCurrent(bookingId: string, surname: string): Promise<BookingInfo>;
   autoRebookEnabled: boolean;
   now(): number;
+  /** 用系统默认浏览器打开 myrta.com，让教练手动改约。测试时替换 */
+  openSite?: () => void;
+}
+
+const SITE = 'https://www.myrta.com/';
+
+/** 用系统默认浏览器打开网址。不用界面窗口的 Chrome：它是中文环境，站点在中文环境下登录控件不工作 */
+export function defaultOpenSite(): void {
+  const [cmd, args] =
+    process.platform === 'win32' ? ['cmd', ['/c', 'start', '""', SITE]] : process.platform === 'darwin' ? ['open', [SITE]] : ['xdg-open', [SITE]];
+  spawn(cmd as string, args as string[], { stdio: 'ignore', detached: true }).on('error', () => {}).unref();
 }
 
 export interface UiServer {
@@ -30,7 +42,9 @@ export interface UiServer {
 }
 
 const PUBLIC_DIR = new URL('./public/', import.meta.url);
-const MIME: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' };
+const MIME: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml',
+};
 
 /** 对外只给 Booking number 的末 3 位，姓氏不返回 */
 export function publicStudent(s: Student) {
@@ -120,7 +134,7 @@ export async function startUiServer(deps: UiDeps, opts: { port?: number; token?:
 
     if (method === 'GET' && path === '/api/state') {
       return send(res, 200, {
-        centres: deps.centreList.map((c) => ({ id: c.id, name: c.name })),
+        centres: deps.centreList.map((c) => ({ id: c.id, name: c.name, suburb: c.suburb, postcode: c.postcode })),
         autoRebookEnabled: deps.autoRebookEnabled,
         messages: recentMessages,
       });
@@ -180,6 +194,10 @@ export async function startUiServer(deps: UiDeps, opts: { port?: number; token?:
         return send(res, 200, { ok: true });
       }
       return send(res, 200, { result: await deps.service.acceptOffer(id) });
+    }
+    if (method === 'POST' && path === '/api/open-site') {
+      (deps.openSite ?? defaultOpenSite)();
+      return send(res, 200, { ok: true });
     }
     if (method === 'GET' && path === '/api/logs') {
       return send(res, 200, deps.repo.recentLogs(100));

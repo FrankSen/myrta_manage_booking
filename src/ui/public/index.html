@@ -4,25 +4,46 @@
 <meta charset="utf-8">
 <title>驾考改约助手</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="/logo.svg">
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-<header>
-  <h1>驾考改约助手</h1>
-  <span id="mode" class="badge"></span>
-  <button id="btn-notify" hidden>开启桌面通知</button>
+<header class="topbar">
+  <img src="/logo.svg" alt="" class="logo">
+  <div class="brand">
+    <h1>驾考改约助手</h1>
+    <div class="sub">myrta.com · NSW 驾考考位自动刷新</div>
+  </div>
+  <div class="sign" id="mode"></div>
+  <button id="btn-notify" class="ghost" hidden>开启桌面通知</button>
 </header>
+<div class="road"></div>
+
 <main>
-  <section id="offers-box" hidden>
-    <h2>待你确认的考位</h2>
-    <div id="offers"></div>
+  <section class="stats" id="stats"></section>
+
+  <section id="todo-box" class="panel todo" hidden>
+    <h2><span class="dot amber"></span>需要你处理</h2>
+    <div id="todo"></div>
   </section>
-  <section>
-    <div class="row"><h2>学员</h2><button id="btn-add">添加学员</button></div>
+
+  <section class="panel">
+    <div class="row">
+      <h2>学员</h2>
+      <button id="btn-add" class="primary">＋ 添加学员</button>
+    </div>
     <div id="students"></div>
   </section>
-  <section>
-    <h2>运行记录</h2>
+
+  <section class="panel">
+    <div class="row">
+      <h2>运行记录</h2>
+      <div class="row tight">
+        <select id="log-student"><option value="">全部学员</option></select>
+        <label class="check"><input type="checkbox" id="log-problems"> 只看问题</label>
+        <button id="log-toggle" class="ghost small">收起</button>
+      </div>
+    </div>
     <div id="logs" class="logs"></div>
   </section>
 </main>
@@ -30,29 +51,58 @@
 <dialog id="dlg-add">
   <form method="dialog" id="form-add">
     <h3>添加学员</h3>
-    <label>备注名（给自己看，不用写全名）<input name="label" required></label>
-    <label>Booking number<input name="bookingId" inputmode="numeric" required></label>
-    <label>姓氏（与预约一致）<input name="surname" required></label>
-    <p class="hint">添加时会登录一次，读取当前预约，大约需要 1 到 2 分钟，期间会弹出一个浏览器窗口，请不要操作或关闭它。</p>
+    <label>备注名<span class="hint">给自己看，不用写全名</span><input name="label" required autocomplete="off"></label>
+    <label>Booking number<input name="bookingId" inputmode="numeric" required autocomplete="off"></label>
+    <label>姓氏<span class="hint">与预约一致，英文</span><input name="surname" required autocomplete="off"></label>
+    <div class="progress" id="add-progress" hidden>
+      <div class="bar"><span></span></div>
+      <p>正在登录 myrta.com 读取现有预约，大约 1 到 2 分钟。<br>期间会弹出一个浏览器窗口，请不要操作或关闭它。</p>
+    </div>
     <p class="error" id="add-error"></p>
-    <div class="row"><button value="cancel" formnovalidate>取消</button><button id="add-submit" value="ok">添加</button></div>
+    <div class="row end"><button value="cancel" formnovalidate id="add-cancel">取消</button><button id="add-submit" value="ok" class="primary">添加并读取预约</button></div>
   </form>
 </dialog>
 
-<dialog id="dlg-target">
+<dialog id="dlg-target" class="wide">
   <form method="dialog" id="form-target">
     <h3 id="target-title">设置目标</h3>
-    <label>目标考点（可多选，按住 Ctrl 或 Shift 选）<select name="centreIds" multiple size="10" id="centre-select"></select></label>
-    <div class="grid2">
-      <label>最早日期<input type="date" name="dateFrom" required></label>
-      <label>最晚日期<input type="date" name="dateTo" required></label>
-      <label>最早时间<input type="time" name="timeFrom" required></label>
-      <label>最晚时间<input type="time" name="timeTo" required></label>
-    </div>
+    <p class="hint" id="target-current"></p>
+
+    <fieldset>
+      <legend>目标考点 <span class="hint" id="centre-count"></span></legend>
+      <input type="search" id="centre-search" placeholder="搜索考点或地区，例如 Silverwater、Auburn、2141">
+      <div id="centre-chosen" class="chips"></div>
+      <div id="centre-list" class="centre-list"></div>
+    </fieldset>
+
+    <fieldset>
+      <legend>日期</legend>
+      <div class="grid2">
+        <label>最早日期<input type="date" name="dateFrom" required></label>
+        <label>最晚日期<input type="date" name="dateTo" required></label>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>时间 <span class="hint">考位每 15 分钟一档</span></legend>
+      <div class="seg" role="radiogroup">
+        <label><input type="radio" name="timeMode" value="range" checked> 时间范围</label>
+        <label><input type="radio" name="timeMode" value="times"> 指定时间</label>
+      </div>
+      <div id="time-range" class="grid2">
+        <label>最早时间<select name="timeFrom" id="time-from"></select></label>
+        <label>最晚时间<select name="timeTo" id="time-to"></select></label>
+      </div>
+      <div id="time-times" hidden>
+        <p class="hint">点选可以接受的考试时间，可多选。只有这些时间算完全符合。</p>
+        <div id="time-grid" class="time-grid"></div>
+      </div>
+    </fieldset>
+
     <p class="error" id="target-error"></p>
-    <div class="row"><button value="cancel" formnovalidate>取消</button><button id="target-submit" value="ok">保存</button></div>
+    <div class="row end"><button value="cancel" formnovalidate>取消</button><button id="target-submit" value="ok" class="primary">保存目标</button></div>
   </form>
 </dialog>
-<script src="/app.js"></script>
+<script type="module" src="/app.js"></script>
 </body>
 </html>

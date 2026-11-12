@@ -14,7 +14,7 @@ afterEach(async () => {
   server = null;
 });
 
-async function setup(opts: { fetchCurrent?: () => Promise<{ centreName: string; date: string; time: string }> } = {}) {
+async function setup(opts: { fetchCurrent?: () => Promise<{ centreName: string; date: string; time: string }>; openSite?: () => void } = {}) {
   const repo = new Repo(openDb(':memory:'), randomBytes(32));
   const clock = new FakeClock(NOW);
   const limiter = { acquire: async () => {}, reportBlocked: () => 1, reportOk: () => {} };
@@ -28,6 +28,7 @@ async function setup(opts: { fetchCurrent?: () => Promise<{ centreName: string; 
     fetchCurrent: opts.fetchCurrent ?? (async () => ({ centreName: SILVERWATER_NAME, date: '2026-12-30', time: '11:30' })),
     autoRebookEnabled: false,
     now: () => clock.now(),
+    openSite: opts.openSite ?? (() => {}),
   });
   const call = (method: string, path: string, body?: unknown, token: string | null = server!.token) =>
     fetch(`http://127.0.0.1:${server!.port}${path}`, {
@@ -259,5 +260,25 @@ describe('事件推送', () => {
   test('事件接口也需要令牌', async () => {
     await setup();
     expect((await fetch(`http://127.0.0.1:${server!.port}/api/events`)).status).toBe(401);
+  });
+});
+
+describe('打开网站', () => {
+  test('需要令牌；带令牌时用系统浏览器打开', async () => {
+    let opened = 0;
+    const { call } = await setup({ openSite: () => opened++ });
+    expect((await call('POST', '/api/open-site', undefined, null)).status).toBe(401);
+    expect(opened).toBe(0);
+    expect((await call('POST', '/api/open-site')).status).toBe(200);
+    expect(opened).toBe(1);
+  });
+});
+
+describe('界面静态文件', () => {
+  test('图标 svg 可访问', async () => {
+    await setup();
+    const res = await fetch(`http://127.0.0.1:${server!.port}/logo.svg`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('svg');
   });
 });
