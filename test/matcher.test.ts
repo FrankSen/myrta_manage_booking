@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'vitest';
 import { indexCentres } from '../src/domain/geo.ts';
-import { DEFAULT_TOLERANCE, evaluate, isBookable } from '../src/domain/matcher.ts';
+import { DEFAULT_TOLERANCE, evaluate, isBookable, refreshDeadline } from '../src/domain/matcher.ts';
 import { sydneyInstant } from '../src/domain/time.ts';
 import type { Centre, Slot, Target } from '../src/domain/types.ts';
 
@@ -126,5 +126,19 @@ describe('最早等于最晚', () => {
     const t: Target = { ...target, timeFrom: '08:00', timeTo: '08:00' };
     expect(evaluate(slot(SILVERWATER, '2026-11-17', '08:00'), t, DEFAULT_TOLERANCE, centres, NOW).kind).toBe('exact');
     expect(evaluate(slot(SILVERWATER, '2026-11-17', '08:15'), t, DEFAULT_TOLERANCE, centres, NOW).kind).toBe('near');
+  });
+});
+
+describe('refreshDeadline', () => {
+  test('目标最晚日期更早：截止于目标最晚日 23:59 前 48 小时', () => {
+    const d = refreshDeadline({ date: '2026-12-30', time: '11:30' }, { dateTo: '2026-12-10' }, 0);
+    expect(d).toEqual({ at: sydneyInstant('2026-12-08', '23:59'), reason: 'target' });
+  });
+  test('原考试更早：截止于原考试前 48 小时', () => {
+    const d = refreshDeadline({ date: '2026-12-05', time: '09:00' }, { dateTo: '2026-12-20' }, 0);
+    expect(d).toEqual({ at: sydneyInstant('2026-12-03', '09:00'), reason: 'locked' });
+  });
+  test('日期容差会延后目标截止', () => {
+    expect(refreshDeadline({ date: '2027-01-30', time: '11:30' }, { dateTo: '2026-12-10' }, 2).at).toBe(sydneyInstant('2026-12-10', '23:59'));
   });
 });

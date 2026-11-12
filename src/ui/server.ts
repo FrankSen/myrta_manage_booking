@@ -9,7 +9,9 @@ import type { Service } from '../engine/service.ts';
 import { describeEvent, type UiMessage } from '../notify/notifier.ts';
 import type { BookingInfo } from '../domain/types.ts';
 import type { Repo, Student } from '../storage/repo.ts';
-import { ValidationError, parseNewStudent, parseTarget } from './validate.ts';
+import { INTERVAL_CHOICES_MIN, INTERVAL_HELP } from '../config/interval.ts';
+import { DEFAULT_TOLERANCE, refreshDeadline } from '../domain/matcher.ts';
+import { ValidationError, parseInterval, parseNewStudent, parseTarget } from './validate.ts';
 
 export interface UiDeps {
   repo: Repo;
@@ -18,6 +20,8 @@ export interface UiDeps {
   /** 新增学员时登录一次读取当前预约。失败抛错，错误信息会返回给教练 */
   fetchCurrent(bookingId: string, surname: string): Promise<BookingInfo>;
   autoRebookEnabled: boolean;
+  /** 日期容差，算"还能刷新到什么时候"用，和引擎一致 */
+  maxDateDays?: number;
   now(): number;
   /** 用系统默认浏览器打开 myrta.com，让教练手动改约。测试时替换 */
   openSite?: () => void;
@@ -47,8 +51,15 @@ const MIME: Record<string, string> = {
 };
 
 /** 对外只给 Booking number 的末 3 位，姓氏不返回 */
-export function publicStudent(s: Student) {
+export function publicStudent(s: Student, service?: Pick<Service, 'progress' | 'intervalFor'>, maxDateDays = DEFAULT_TOLERANCE.maxDateDays) {
   return {
+    rounds: s.rounds,
+    lastRoundAt: s.lastRoundAt,
+    intervalMs: s.intervalMs,
+    effectiveIntervalMs: service?.intervalFor(s.id) ?? null,
+    progress: service?.progress(s.id) ?? null,
+    /** 最晚能刷新到什么时候，过了就自动停止 */
+    deadline: refreshDeadline(s.current, s.target, maxDateDays),
     id: s.id,
     label: s.label,
     bookingIdTail: s.bookingId.slice(-3),
@@ -137,10 +148,14 @@ export async function startUiServer(deps: UiDeps, opts: { port?: number; token?:
         centres: deps.centreList.map((c) => ({ id: c.id, name: c.name, suburb: c.suburb, postcode: c.postcode })),
         autoRebookEnabled: deps.autoRebookEnabled,
         messages: recentMessages,
+        intervalMs: deps.service.globalInterval(),
+        intervalChoicesMin: INTERVAL_CHOICES_MIN,
+        intervalHelp: INTERVAL_HELP,
+        now: deps.now(),
       });
     }
     if (method === 'GET' && path === '/api/students') {
-      return send(res, 200, deps.repo.listStudents().map(publicStudent));
+      return send(res, 200, { now: deps.now(), students: deps.repo.listStudents().map((x) => publicStudent(x, deps.service, deps.maxDateDays)) });
     }
     if (method === 'POST' && path === '/api/students') {
       const input = parseNewStudent(await readJson(req));
@@ -156,13 +171,13 @@ export async function startUiServer(deps: UiDeps, opts: { port?: number; token?:
         current,
         target: { centreIds: centre ? [centre.id] : [], dateFrom: current.date, dateTo: current.date, timeFrom: '08:00', timeTo: '17:00' },
       });
-      return send(res, 201, publicStudent(deps.repo.getStudent(id)!));
+      return send(res, 201, publicStudent(deps.repo.getStudent(id)!, deps.service, deps.maxDateDays));
     }
     if ((m = /^\/api\/students\/(\d+)\/target$/.exec(path)) && method === 'PUT') {
       const id = Number(m[1]);
       if (!deps.repo.getStudent(id)) return send(res, 404, { error: '没有这个学员' });
       deps.repo.updateTarget(id, parseTarget(await readJson(req), known));
-      return send(res, 200, publicStudent(deps.repo.getStudent(id)!));
+      return send(res, 200, publicStudent(deps.repo.getStudent(id)!, deps.service, deps.maxDateDays));
     }
     if ((m = /^\/api\/students\/(\d+)\/(start|pause)$/.exec(path)) && method === 'POST') {
       const id = Number(m[1]);
@@ -174,7 +189,7 @@ export async function startUiServer(deps: UiDeps, opts: { port?: number; token?:
       } else {
         deps.service.pauseStudent(id);
       }
-      return send(res, 200, publicStudent(deps.repo.getStudent(id)!));
+      return send(res, 200, publicStudent(deps.repo.getStudent(id)!, deps.service, deps.maxDateDays));
     }
     if ((m = /^\/api\/students\/(\d+)$/.exec(path)) && method === 'DELETE') {
       const id = Number(m[1]);
@@ -194,6 +209,17 @@ export async function startUiServer(deps: UiDeps, opts: { port?: number; token?:
         return send(res, 200, { ok: true });
       }
       return send(res, 200, { result: await deps.service.acceptOffer(id) });
+    }
+    if (method === 'PUT' && path === '/api/settings/interval') {
+      const ms = parseInterval(await readJson(req), false);
+      deps.service.setGlobalInterval(ms!);
+      return send(res, 200, { intervalMs: ms });
+    }
+    if ((m = /^\/api\/students\/(\d+)\/interval$/.exec(path)) && method === 'PUT') {
+      const id = Number(m[1]);
+      if (!deps.repo.getStudent(id)) return send(res, 404, { error: '没有这个学员' });
+      deps.service.setStudentInterval(id, parseInterval(await readJson(req), true));
+      return send(res, 200, publicStudent(deps.repo.getStudent(id)!, deps.service, deps.maxDateDays));
     }
     if (method === 'POST' && path === '/api/open-site') {
       (deps.openSite ?? defaultOpenSite)();

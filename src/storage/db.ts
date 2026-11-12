@@ -33,6 +33,18 @@ CREATE TABLE IF NOT EXISTS logs (
 );
 `;
 
+/** 给旧数据库补上后来新增的列。可以重复执行 */
+export function migrate(db: DatabaseSync): void {
+  const cols = new Set((db.prepare('PRAGMA table_info(students)').all() as { name: string }[]).map((c) => c.name));
+  const add = (name: string, def: string) => {
+    if (!cols.has(name)) db.exec(`ALTER TABLE students ADD COLUMN ${name} ${def}`);
+  };
+  // 已完成的刷新轮数、最近一轮结束时间、单独设置的刷新间隔（毫秒，空表示用全局设置）
+  add('rounds', 'INTEGER NOT NULL DEFAULT 0');
+  add('last_round_at', 'INTEGER');
+  add('interval_ms', 'INTEGER');
+}
+
 /** 打开（必要时创建）数据库。':memory:' 用于测试 */
 export function openDb(path: string): DatabaseSync {
   if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
@@ -40,5 +52,6 @@ export function openDb(path: string): DatabaseSync {
   db.exec('PRAGMA foreign_keys = ON');
   if (path !== ':memory:') db.exec('PRAGMA journal_mode = WAL');
   db.exec(SCHEMA);
+  migrate(db);
   return db;
 }

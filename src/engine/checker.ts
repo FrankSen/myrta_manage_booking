@@ -1,7 +1,7 @@
 import type { Clock } from '../scheduler/clock.ts';
 import type { Limiter } from '../scheduler/limiter.ts';
 import { nearbyCentres } from '../domain/geo.ts';
-import { evaluate } from '../domain/matcher.ts';
+import { evaluate, refreshDeadline } from '../domain/matcher.ts';
 import { LOCK_MS, addDays, sydneyDateOf, sydneyInstant } from '../domain/time.ts';
 import type { BookingInfo, CentreIndex, LocalDate, Slot, Tolerance } from '../domain/types.ts';
 import { SiteError, type SiteErrorKind } from '../site/errors.ts';
@@ -42,6 +42,8 @@ export interface CheckDeps {
   autoRebookEnabled: boolean;
   notify(event: NotifyEvent): void;
   state: CheckState;
+  /** 报告本轮正在做什么，界面显示用 */
+  onPhase?: (studentId: number, phase: string) => void;
 }
 
 /** continue：下一轮继续；stop：这个学员不用再排队了 */
@@ -87,21 +89,18 @@ export async function checkStudent(studentId: number, deps: CheckDeps): Promise<
 
 /** R2、R3：不需要访问站点就能判断的停止条件。返回停止原因 */
 function preflight(student: Student, current: BookingInfo, deps: CheckDeps): string | null {
-  const now = deps.clock.now();
-  if (sydneyInstant(current.date, current.time) - now < LOCK_MS) {
-    return '原考试距现在不足 48 小时，预约已锁定，不能再改';
-  }
-  const lastDate = addDays(student.target.dateTo, deps.tolerance.maxDateDays);
-  if (sydneyInstant(lastDate, '23:59') - now < LOCK_MS) {
-    return '目标日期范围已全部进入 48 小时以内，没有可改的日子了';
-  }
-  return null;
+  const d = refreshDeadline(current, student.target, deps.tolerance.maxDateDays);
+  if (deps.clock.now() <= d.at) return null;
+  return d.reason === 'locked' ? '原考试距现在不足 48 小时，预约已锁定，不能再改' : '目标日期范围已全部进入 48 小时以内，没有可改的日子了';
 }
 
 async function runRound(student: Student, deps: CheckDeps): Promise<CheckOutcome> {
   const { repo, limiter, clock, tolerance, centres } = deps;
+  const phase = (p: string) => deps.onPhase?.(student.id, p);
+  phase('打开浏览器');
   const session = await deps.getSession(student.id);
 
+  phase('登录读取预约');
   const current = await session.login(student.bookingId, student.surname);
   repo.setCurrent(student.id, current);
   const early = preflight(student, current, deps);
@@ -113,7 +112,9 @@ async function runRound(student: Student, deps: CheckDeps): Promise<CheckOutcome
   const to = addDays(target.dateTo, tolerance.maxDateDays);
 
   for (const centreId of centresToCheck(student, deps)) {
+    phase(`排队等待访问间隔`);
     await limiter.acquire(deps.signal);
+    phase(`查看 ${centres.get(centreId)?.name ?? `考点 ${centreId}`}`);
     const slots = await session.listSlots(centreId, from, to);
     limiter.reportOk();
 
@@ -170,6 +171,7 @@ export async function rebookSlot(student: Student, slot: Slot, session: SiteSess
   const centre = deps.centres.get(slot.centreId)!;
 
   // 改约是抢时间的操作，只有几次页面跳转，不再排队等全局限速
+  deps.onPhase?.(student.id, `选位到确认页：${centre.name} ${slot.date} ${slot.time}`);
   const confirm = await session.reachConfirm(slot);
   if (!sameName(confirm.centreName, centre.name) || confirm.date !== slot.date || confirm.time !== slot.time) {
     throw new SiteError(

@@ -194,3 +194,58 @@ describe('Scheduler', () => {
     expect(sch.start(3)).toBe(true);
   });
 });
+
+describe('Scheduler：间隔可调与运行信息', () => {
+  test('每个学员可以有自己的间隔', async () => {
+    const calls: [number, number][] = [];
+    const clock = new FakeClock(0);
+    const sch = new Scheduler(clock, H, async (id) => void calls.push([id, clock.now()]), () => 0.5, (id) => (id === 2 ? 5 * MIN : 2 * MIN));
+    sch.start(1);
+    sch.start(2);
+    await clock.advance(5 * MIN);
+    expect(calls.filter(([id]) => id === 1).map(([, t]) => t)).toEqual([0, 2 * MIN, 4 * MIN]);
+    expect(calls.filter(([id]) => id === 2).map(([, t]) => t)).toEqual([0, 5 * MIN]);
+  });
+
+  test('info：正在跑时 running 为 true；等待时给出下一轮时刻', async () => {
+    let release!: () => void;
+    const clock = new FakeClock(0);
+    const sch = new Scheduler(clock, H, () => new Promise<void>((r) => (release = r)), () => 0.5);
+    expect(sch.info(1)).toBeNull();
+    sch.start(1);
+    await clock.advance(0);
+    expect(sch.info(1)).toEqual({ running: true, nextAt: null });
+    await clock.advance(30_000);
+    release();
+    await clock.advance(0);
+    expect(sch.info(1)).toEqual({ running: false, nextAt: 30_000 + 2 * MIN });
+  });
+
+  test('reschedule：等待中改了间隔，按新间隔从上一轮结束算起', async () => {
+    let interval = 10 * MIN;
+    const calls: number[] = [];
+    const clock = new FakeClock(0);
+    const sch = new Scheduler(clock, H, async () => void calls.push(clock.now()), () => 0.5, () => interval);
+    sch.start(1);
+    await clock.advance(3 * MIN);
+    interval = 5 * MIN;
+    sch.reschedule(1);
+    await clock.advance(0);
+    expect(sch.info(1)!.nextAt).toBe(5 * MIN);
+    await clock.advance(2 * MIN);
+    expect(calls).toEqual([0, 5 * MIN]);
+  });
+
+  test('reschedule：新间隔已经过了，立刻跑', async () => {
+    let interval = 10 * MIN;
+    const calls: number[] = [];
+    const clock = new FakeClock(0);
+    const sch = new Scheduler(clock, H, async () => void calls.push(clock.now()), () => 0.5, () => interval);
+    sch.start(1);
+    await clock.advance(4 * MIN);
+    interval = 2 * MIN;
+    sch.reschedule(1);
+    await clock.advance(0);
+    expect(calls).toEqual([0, 4 * MIN]);
+  });
+});

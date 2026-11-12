@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, test } from 'vitest';
 import { startApp, type App } from '../src/app/start.ts';
-import { loadSettings } from '../src/app/settings-file.ts';
+import { loadSettings, saveCheckInterval } from '../src/app/settings-file.ts';
 import { DEFAULT_SETTINGS } from '../src/config/settings.ts';
 import { UnavailableSession } from '../src/site/unavailable.ts';
 import { FakeSession, SILVERWATER_NAME } from './helpers/fakes.ts';
@@ -230,5 +230,31 @@ describe('退出时', () => {
     expect(Date.now() - t).toBeLessThan(1000);
     expect(closed).toBe(true);
     await req;
+  });
+});
+
+describe('保存刷新间隔', () => {
+  test('写回 settings.json，保留文件里原有的其他配置；重启后生效', async () => {
+    const p = join(dir(), 's.json');
+    writeFileSync(p, JSON.stringify({ hidden: { maxActiveStudents: 3 }, tolerance: { maxDistanceKm: 8 } }));
+    saveCheckInterval(p, 5 * 60_000);
+    const s = loadSettings(p);
+    expect(s.hidden.checkIntervalMs).toBe(5 * 60_000);
+    expect(s.hidden.maxActiveStudents).toBe(3);
+    expect(s.tolerance.maxDistanceKm).toBe(8);
+  });
+  test('文件不存在时新建', () => {
+    const p = join(dir(), 'sub', 's.json');
+    saveCheckInterval(p, 3 * 60_000);
+    expect(loadSettings(p).hidden.checkIntervalMs).toBe(3 * 60_000);
+  });
+  test('界面改间隔后写进运行时目录的配置文件', async () => {
+    const d = dir();
+    app = await startApp({ runtimeDir: d, centresFile, openWindow: () => null, openSession: async () => new FakeSession() });
+    const res = await fetch(`http://127.0.0.1:${app.ui.port}/api/settings/interval`, {
+      method: 'PUT', headers: { 'X-Token': app.ui.token, 'Content-Type': 'application/json' }, body: JSON.stringify({ ms: 10 * 60_000 }),
+    });
+    expect(res.status).toBe(200);
+    expect(loadSettings(join(d, 'settings.json')).hidden.checkIntervalMs).toBe(10 * 60_000);
   });
 });

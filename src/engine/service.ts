@@ -18,6 +18,16 @@ export interface ServiceDeps {
   openSession(studentId: number): Promise<SiteSession>;
   notify(event: NotifyEvent): void;
   random?: () => number;
+  /** 全局刷新间隔改了之后保存，返回前不应抛错以外的异常 */
+  saveGlobalInterval?: (ms: number) => void;
+}
+
+export interface Progress {
+  running: boolean;
+  /** 下一轮开始的时刻；正在跑时为 null */
+  nextAt: number | null;
+  /** 正在跑时在做什么 */
+  phase: string;
 }
 
 /**
@@ -36,23 +46,55 @@ export class Service {
   private readonly locks = new Map<number, Promise<unknown>>();
   private readonly state = newCheckState();
   private readonly abort = new AbortController();
+  private readonly phases = new Map<number, string>();
+  private globalIntervalMs: number;
 
   constructor(deps: ServiceDeps) {
     this.deps = deps;
-    this.scheduler = new Scheduler(deps.clock, deps.settings.hidden, (id) => this.runCheck(id), deps.random);
+    this.globalIntervalMs = deps.settings.hidden.checkIntervalMs;
+    this.scheduler = new Scheduler(deps.clock, deps.settings.hidden, (id) => this.runCheck(id), deps.random, (id) => this.intervalFor(id));
   }
 
-  /** 开始为学员刷新。超过上限或学员已完成时返回 false，状态不变 */
-  startStudent(id: number): boolean {
+  /** 开始为学员刷新。超过上限或学员已完成时返回 false，状态不变。resume 为 true 时（程序重启后继续）不清零轮数 */
+  startStudent(id: number, resume = false): boolean {
     const s = this.deps.repo.getStudent(id);
     if (!s || !STARTABLE.includes(s.status)) return false;
+    if (this.scheduler.activeIds().includes(id)) return true;
     const before = { status: s.status, note: s.statusNote };
     this.deps.repo.setStatus(id, 'running', '');
     if (!this.scheduler.start(id)) {
       this.deps.repo.setStatus(id, before.status, before.note);
       return false;
     }
+    if (!resume) this.deps.repo.resetRounds(id);
     return true;
+  }
+
+  /** 学员的刷新间隔：单独设置的优先，否则用全局设置 */
+  intervalFor(id: number): number {
+    return this.deps.repo.getStudent(id)?.intervalMs ?? this.globalIntervalMs;
+  }
+
+  globalInterval(): number {
+    return this.globalIntervalMs;
+  }
+
+  setGlobalInterval(ms: number): void {
+    this.globalIntervalMs = ms;
+    this.deps.saveGlobalInterval?.(ms);
+    for (const id of this.scheduler.activeIds()) this.scheduler.reschedule(id);
+  }
+
+  /** ms 为 null 表示改回用全局设置 */
+  setStudentInterval(id: number, ms: number | null): void {
+    this.deps.repo.setInterval(id, ms);
+    this.scheduler.reschedule(id);
+  }
+
+  progress(id: number): Progress | null {
+    const info = this.scheduler.info(id);
+    if (!info) return null;
+    return { running: info.running, nextAt: info.nextAt, phase: info.running ? (this.phases.get(id) ?? '') : '' };
   }
 
   pauseStudent(id: number): void {
@@ -66,7 +108,7 @@ export class Service {
   /** 程序重启后，把上次还在运行的学员重新启动 */
   resumeAll(): void {
     for (const s of this.deps.repo.listStudents()) {
-      if (s.status === 'running') this.startStudent(s.id);
+      if (s.status === 'running') this.startStudent(s.id, true);
     }
   }
 
@@ -121,12 +163,21 @@ export class Service {
       autoRebookEnabled: d.settings.autoRebookEnabled,
       notify: (e) => d.notify(e),
       state: this.state,
+      onPhase: (id, p) => this.phases.set(id, p),
     };
   }
 
   private runCheck(id: number): Promise<void> {
     return this.withLock(id, async () => {
-      const outcome = await checkStudent(id, this.checkDeps());
+      this.phases.set(id, '准备');
+      let outcome;
+      try {
+        outcome = await checkStudent(id, this.checkDeps());
+      } finally {
+        this.phases.delete(id);
+      }
+      // 只要这一轮跑过（没有因为退出而中断），就算一轮
+      if (!this.abort.signal.aborted && this.deps.repo.getStudent(id)) this.deps.repo.countRound(id, this.deps.clock.now());
       if (outcome === 'stop') {
         this.scheduler.stop(id);
         await this.dropSession(id);

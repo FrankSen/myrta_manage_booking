@@ -1,5 +1,5 @@
 import { minDistanceKm } from './geo.ts';
-import { LOCK_MS, diffDays, minutesOf, sydneyInstant } from './time.ts';
+import { LOCK_MS, addDays, diffDays, minutesOf, sydneyInstant } from './time.ts';
 import type { CentreIndex, MatchResult, Slot, Target, Tolerance } from './types.ts';
 
 export const DEFAULT_TOLERANCE: Tolerance = {
@@ -73,4 +73,14 @@ export function evaluate(
   }
 
   return { kind: 'near', notes };
+}
+
+/**
+ * 这个学员最晚能刷新到什么时候（UTC 毫秒）：原考试前 48 小时预约锁定；
+ * 目标最晚一天（含日期容差）的 23:59 前 48 小时，之后没有可改的日子。取两者较早的
+ */
+export function refreshDeadline(current: { date: string; time: string }, target: Pick<Target, 'dateTo'>, maxDateDays: number): { at: number; reason: 'locked' | 'target' } {
+  const locked = sydneyInstant(current.date, current.time) - LOCK_MS;
+  const targetEnd = sydneyInstant(addDays(target.dateTo, maxDateDays), '23:59') - LOCK_MS;
+  return locked <= targetEnd ? { at: locked, reason: 'locked' } : { at: targetEnd, reason: 'target' };
 }

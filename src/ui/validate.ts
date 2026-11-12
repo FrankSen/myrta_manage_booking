@@ -1,3 +1,4 @@
+import { INTERVAL_CHOICES_MIN, isAllowedInterval } from '../config/interval.ts';
 import type { Target } from '../domain/types.ts';
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -63,4 +64,14 @@ export function parseNewStudent(raw: unknown): NewStudentInput {
   if (!/^\d{6,12}$/.test(bookingId)) throw new ValidationError('Booking number 应为 6 到 12 位数字');
   if (!surname) throw new ValidationError('请填写姓氏');
   return { label, bookingId, surname };
+}
+
+/** 刷新间隔：{ ms }。allowNull 时 ms 为 null 表示改回用全局设置 */
+export function parseInterval(raw: unknown, allowNull: boolean): number | null {
+  const ms = raw && typeof raw === 'object' ? (raw as Record<string, unknown>).ms : undefined;
+  if (ms === null && allowNull) return null;
+  if (typeof ms !== 'number' || !isAllowedInterval(ms)) {
+    throw new ValidationError(`刷新间隔只能选 ${INTERVAL_CHOICES_MIN.join('、')} 分钟`);
+  }
+  return ms;
 }

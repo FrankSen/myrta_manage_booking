@@ -16,6 +16,11 @@ export interface Student {
   target: Target;
   status: StudentStatus;
   statusNote: string;
+  /** 本次开始刷新以来完成的轮数 */
+  rounds: number;
+  lastRoundAt: number | null;
+  /** 单独设置的刷新间隔（毫秒）；null 表示用全局设置 */
+  intervalMs: number | null;
 }
 
 export interface Offer {
@@ -47,7 +52,7 @@ export class Repo {
     this.key = key;
   }
 
-  addStudent(s: Omit<Student, 'id' | 'status' | 'statusNote'>): number {
+  addStudent(s: Omit<Student, 'id' | 'status' | 'statusNote' | 'rounds' | 'lastRoundAt' | 'intervalMs'>): number {
     const r = this.db
       .prepare(
         `INSERT INTO students (label, booking_id_enc, surname_enc, current_json, target_json)
@@ -76,6 +81,18 @@ export class Repo {
 
   setCurrent(id: number, current: BookingInfo): void {
     this.db.prepare('UPDATE students SET current_json = ? WHERE id = ?').run(JSON.stringify(current), id);
+  }
+
+  countRound(id: number, nowMs: number): void {
+    this.db.prepare('UPDATE students SET rounds = rounds + 1, last_round_at = ? WHERE id = ?').run(nowMs, id);
+  }
+
+  resetRounds(id: number): void {
+    this.db.prepare('UPDATE students SET rounds = 0, last_round_at = NULL WHERE id = ?').run(id);
+  }
+
+  setInterval(id: number, ms: number | null): void {
+    this.db.prepare('UPDATE students SET interval_ms = ? WHERE id = ?').run(ms, id);
   }
 
   deleteStudent(id: number): void {
@@ -129,6 +146,9 @@ export class Repo {
       target: JSON.parse(r.target_json as string) as Target,
       status: r.status as StudentStatus,
       statusNote: r.status_note as string,
+      rounds: (r.rounds as number | null) ?? 0,
+      lastRoundAt: (r.last_round_at as number | null) ?? null,
+      intervalMs: (r.interval_ms as number | null) ?? null,
     };
   }
 

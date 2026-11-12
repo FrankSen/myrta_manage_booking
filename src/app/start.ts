@@ -14,7 +14,7 @@ import { startUiServer, type UiServer } from '../ui/server.ts';
 import { QUIET_ARGS, realFindBrowser } from '../site/browser.ts';
 import { acquireLock } from './lock.ts';
 import { runtimePaths } from './paths.ts';
-import { loadSettings } from './settings-file.ts';
+import { loadSettings, saveCheckInterval } from './settings-file.ts';
 
 export interface AppOptions {
   runtimeDir: string;
@@ -80,6 +80,7 @@ export async function startApp(opts: AppOptions): Promise<App> {
       repo, clock, limiter, settings, centres,
       openSession: (id) => opts.openSession(id, `${paths.browserProfiles}/${id}`),
       notify: (e) => ui?.publish(e),
+      saveGlobalInterval: (ms) => saveCheckInterval(paths.settings, ms),
     });
     closers.push(() => service.stopAll());
 
@@ -87,6 +88,7 @@ export async function startApp(opts: AppOptions): Promise<App> {
       {
         repo, service, centreList,
         autoRebookEnabled: settings.autoRebookEnabled,
+        maxDateDays: settings.tolerance.maxDateDays,
         now: () => clock.now(),
         // 临时读取共用一个 probe 目录，同一目录不能同时开两个浏览器，所以排队执行
         fetchCurrent: (bookingId, surname): Promise<BookingInfo> => {

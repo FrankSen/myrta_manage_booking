@@ -318,3 +318,71 @@ describe('退出时不被限速等待卡住', () => {
     expect(repo.getStudent(id)!.status).toBe('running'); // 被中断不是失败，不改状态
   });
 });
+
+describe('刷新间隔与进度', () => {
+  test('每完成一轮计数；重新开始时清零', async () => {
+    const t = setup();
+    const id = t.addStudent();
+    t.service.startStudent(id);
+    await t.clock.advance(0);
+    await t.clock.advance(3 * MIN);
+    expect(t.repo.getStudent(id)!.rounds).toBe(2);
+    t.service.pauseStudent(id);
+    await t.clock.advance(0);
+    expect(t.repo.getStudent(id)!.rounds).toBe(2);
+    t.service.startStudent(id);
+    await t.clock.advance(0);
+    expect(t.repo.getStudent(id)!.rounds).toBe(1);
+    await t.service.stopAll();
+  });
+
+  test('程序重启后自动继续的学员，轮数不清零', async () => {
+    const t = setup();
+    const id = t.addStudent();
+    t.repo.setStatus(id, 'running');
+    t.repo.countRound(id, 1);
+    t.service.resumeAll();
+    await t.clock.advance(0);
+    expect(t.repo.getStudent(id)!.rounds).toBe(2);
+    await t.service.stopAll();
+  });
+
+  test('progress：等待中给出下一轮时刻，正在跑时给出阶段', async () => {
+    const t = setup();
+    const id = t.addStudent();
+    expect(t.service.progress(id)).toBeNull();
+    t.service.startStudent(id);
+    await t.clock.advance(0);
+    expect(t.service.progress(id)).toEqual({ running: false, nextAt: NOW + 2 * MIN, phase: '' });
+    await t.service.stopAll();
+  });
+
+  test('改全局间隔：等待中的学员立刻按新间隔计时', async () => {
+    const t = setup();
+    const id = t.addStudent();
+    t.service.startStudent(id);
+    await t.clock.advance(0);
+    t.service.setGlobalInterval(5 * MIN);
+    await t.clock.advance(0);
+    expect(t.service.progress(id)!.nextAt).toBe(NOW + 5 * MIN);
+    expect(t.service.intervalFor(id)).toBe(5 * MIN);
+    await t.service.stopAll();
+  });
+
+  test('学员单独间隔优先于全局；取消后回到全局', async () => {
+    const t = setup();
+    const id = t.addStudent();
+    t.service.startStudent(id);
+    await t.clock.advance(0);
+    t.service.setStudentInterval(id, 10 * MIN);
+    await t.clock.advance(0);
+    expect(t.service.progress(id)!.nextAt).toBe(NOW + 10 * MIN);
+    t.service.setGlobalInterval(3 * MIN);
+    expect(t.service.intervalFor(id)).toBe(10 * MIN);
+    t.service.setStudentInterval(id, null);
+    await t.clock.advance(0);
+    expect(t.service.intervalFor(id)).toBe(3 * MIN);
+    expect(t.service.progress(id)!.nextAt).toBe(NOW + 3 * MIN);
+    await t.service.stopAll();
+  });
+});

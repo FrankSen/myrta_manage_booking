@@ -282,3 +282,54 @@ describe('界面静态文件', () => {
     expect(res.headers.get('content-type')).toContain('svg');
   });
 });
+
+describe('刷新间隔', () => {
+  const create = async (call: Awaited<ReturnType<typeof setup>>['call']) =>
+    ((await (await call('POST', '/api/students', { label: 'A', bookingId: '1234567890', surname: 'T' })).json()) as { id: number }).id;
+
+  test('state 里有当前间隔、可选项和说明', async () => {
+    const { call } = await setup();
+    const st = (await (await call('GET', '/api/state')).json()) as { intervalMs: number; intervalChoicesMin: number[]; intervalHelp: string[] };
+    expect(st.intervalMs).toBe(2 * 60_000);
+    expect(st.intervalChoicesMin[0]).toBe(1);
+    expect(st.intervalHelp.join('')).toContain('为什么不是越快越好');
+  });
+
+  test.each([[30_000], [90_000], [-1], ['2'], [null]])('全局间隔不合法：%s → 400', async (ms) => {
+    const { call, service } = await setup();
+    expect((await call('PUT', '/api/settings/interval', { ms })).status).toBe(400);
+    expect(service.globalInterval()).toBe(2 * 60_000);
+  });
+
+  test('全局间隔：改成 5 分钟', async () => {
+    const { call, service } = await setup();
+    expect((await call('PUT', '/api/settings/interval', { ms: 5 * 60_000 })).status).toBe(200);
+    expect(service.globalInterval()).toBe(5 * 60_000);
+  });
+
+  test('学员单独间隔：设置、取消；学员列表里能看到生效的间隔', async () => {
+    const { call } = await setup();
+    const id = await create(call);
+    const r = (await (await call('PUT', `/api/students/${id}/interval`, { ms: 10 * 60_000 })).json()) as { intervalMs: number; effectiveIntervalMs: number };
+    expect(r).toMatchObject({ intervalMs: 10 * 60_000, effectiveIntervalMs: 10 * 60_000 });
+    const back = (await (await call('PUT', `/api/students/${id}/interval`, { ms: null })).json()) as { intervalMs: number | null; effectiveIntervalMs: number };
+    expect(back).toMatchObject({ intervalMs: null, effectiveIntervalMs: 2 * 60_000 });
+    expect((await call('PUT', `/api/students/${id}/interval`, { ms: 1000 })).status).toBe(400);
+    expect((await call('PUT', '/api/students/999/interval', { ms: 60_000 })).status).toBe(404);
+  });
+
+  test('学员列表带服务器时间、轮数、进度', async () => {
+    const { call, clock } = await setup();
+    const id = await create(call);
+    await call('PUT', `/api/students/${id}/target`, goodTarget);
+    await call('POST', `/api/students/${id}/start`);
+    await clock.advance(0);
+    const body = (await (await call('GET', '/api/students')).json()) as { now: number; students: { rounds: number; progress: { nextAt: number } }[] };
+    expect(body.now).toBe(NOW);
+    expect(body.students[0]!.rounds).toBe(1);
+    // 间隔有 ±20% 随机浮动
+    const wait = body.students[0]!.progress.nextAt - NOW;
+    expect(wait).toBeGreaterThanOrEqual(0.8 * 2 * 60_000);
+    expect(wait).toBeLessThanOrEqual(1.2 * 2 * 60_000);
+  });
+});
