@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { lstatSync, readdirSync, readFileSync, readlinkSync, writeFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { crc32, deflateRawSync } from 'node:zlib';
 
@@ -6,7 +6,9 @@ import { crc32, deflateRawSync } from 'node:zlib';
  * 把一个文件夹打成 zip（文件夹本身作为顶层目录）。
  * 文件名按 UTF-8 写入并设置 UTF-8 标志位（0x800），Windows 解压中文文件名才不会乱码。
  * macOS 自带的 zip 和 ditto 都不设这个标志。不支持单个文件超过 4GB（这里用不到）。
- * 同时记录 Unix 权限：Mac 版里的 node 和"启动.command"解压后要保持可执行。
+ * 同时记录 Unix 权限：Mac 版 .app 里的可执行文件解压后要保持可执行。
+ * 符号链接按 Unix 约定保存（类型 0o120000，内容是链接目标）：Mac 的 .app 框架里有很多，展开成文件会坏掉签名结构、体积翻倍。
+ * 超过 4GB 用 ZIP64，这里用不到，所以不支持。
  */
 export function zipDir(dir: string, out: string): number {
   const base = join(dir, '..');
@@ -14,7 +16,8 @@ export function zipDir(dir: string, out: string): number {
   const walk = (d: string) => {
     for (const name of readdirSync(d).sort()) {
       const p = join(d, name);
-      if (statSync(p).isDirectory()) walk(p);
+      const st = lstatSync(p);
+      if (st.isDirectory()) walk(p);
       else files.push(p);
     }
   };
@@ -30,8 +33,10 @@ export function zipDir(dir: string, out: string): number {
 
   for (const file of files) {
     const name = Buffer.from(relative(base, file).split(sep).join('/'), 'utf8');
-    const data = readFileSync(file);
-    const mode = statSync(file).mode & 0o777;
+    const st = lstatSync(file);
+    const link = st.isSymbolicLink();
+    const data = link ? Buffer.from(readlinkSync(file), 'utf8') : readFileSync(file);
+    const mode = st.mode & 0o777;
     const crc = crc32(data);
     const deflated = deflateRawSync(data, { level: 9 });
     const useDeflate = deflated.length < data.length;
@@ -64,8 +69,8 @@ export function zipDir(dir: string, out: string): number {
     cen.writeUInt32LE(body.length, 20);
     cen.writeUInt32LE(data.length, 24);
     cen.writeUInt16LE(name.length, 28);
-    // 外部属性高 16 位放 Unix 文件类型和权限（普通文件 0o100000）
-    cen.writeUInt32LE(((0o100000 | mode) << 16) >>> 0, 38);
+    // 外部属性高 16 位放 Unix 文件类型和权限（普通文件 0o100000，符号链接 0o120000）
+    cen.writeUInt32LE((((link ? 0o120000 : 0o100000) | mode) << 16) >>> 0, 38);
     cen.writeUInt32LE(offset, 42);
     central.push(cen, name);
     offset += local.length + name.length + body.length;

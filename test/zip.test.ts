@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { lstatSync, mkdirSync, readFileSync, readlinkSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 import { zipDir } from '../scripts/zip.ts';
@@ -37,5 +37,20 @@ describe('zipDir', () => {
     // 可执行权限保留，普通文件不变成可执行
     expect(statSync(join(x, 'pkg', 'run.command')).mode & 0o111).not.toBe(0);
     expect(statSync(join(x, 'pkg', 'sub', 'big.txt')).mode & 0o111).toBe(0);
+  });
+
+  test('符号链接保存为链接，解压后仍是链接', () => {
+    const d = tempDir('zip-');
+    const src = join(d, 'App.app');
+    mkdirSync(join(src, 'Versions', 'A'), { recursive: true });
+    writeFileSync(join(src, 'Versions', 'A', 'bin'), 'x', { mode: 0o755 });
+    symlinkSync('A', join(src, 'Versions', 'Current'));
+    const out = join(d, 'a.zip');
+    zipDir(src, out);
+    const x = join(d, 'x');
+    mkdirSync(x);
+    execFileSync(process.platform === 'darwin' ? 'ditto' : 'unzip', process.platform === 'darwin' ? ['-x', '-k', out, x] : ['-q', out, '-d', x]);
+    expect(lstatSync(join(x, 'App.app', 'Versions', 'Current')).isSymbolicLink()).toBe(true);
+    expect(readlinkSync(join(x, 'App.app', 'Versions', 'Current'))).toBe('A');
   });
 });

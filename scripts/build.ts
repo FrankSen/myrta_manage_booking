@@ -1,86 +1,31 @@
-// 生成可直接运行的版本：一个文件夹，自带 Node，不需要安装。
+// 生成独立应用（Electron）。不用 electron-builder：它还要另外下载很多东西，本机网络慢。
 //   node scripts/build.ts            默认 win-x64
 //   node scripts/build.ts mac-arm64  Apple 芯片的 Mac
 //   node scripts/build.ts mac-x64    Intel 芯片的 Mac
-// 输出：release/<平台>/myrta-rebook/ 和 release/myrta-rebook-<版本>-<平台>.zip
-// Node 用 curl 下载（Windows 10 以上和 macOS 都自带），用官方 SHASUMS256 校验，缓存在 release/cache/，下次不再下载。
-import { createHash } from 'node:crypto';
-import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+// 输出：release/<平台>/MyRTA Rebook/ 和 release/myrta-rebook-<版本>-<平台>.zip
+//   Windows：MyRTA Rebook/MyRTA Rebook.exe（改了图标和版本信息），解压后双击即可，第一次运行会建桌面和开始菜单快捷方式
+//   Mac：MyRTA Rebook/MyRTA Rebook.app，未签名，使用手册写了去隔离标记的方法
+// 应用代码放在 resources/app/（不打 asar），Electron 直接运行 .ts。运行数据在系统的应用数据目录，和程序分开。
+import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { ELECTRON_PLATFORMS, electronZip, unzip, type Target } from './electron-bin.ts';
 import { zipDir } from './zip.ts';
 
-const NODE_VERSION = 'v24.14.0';
-const TARGETS = {
-  'win-x64': { dist: `node-${NODE_VERSION}-win-x64`, ext: 'zip', files: ['node.exe', 'LICENSE'] },
-  'mac-arm64': { dist: `node-${NODE_VERSION}-darwin-arm64`, ext: 'tar.gz', files: ['bin/node', 'LICENSE'] },
-  'mac-x64': { dist: `node-${NODE_VERSION}-darwin-x64`, ext: 'tar.gz', files: ['bin/node', 'LICENSE'] },
-} as const;
-type TargetName = keyof typeof TARGETS;
-const targetName = (process.argv[2] ?? 'win-x64') as TargetName;
-const target = TARGETS[targetName];
-if (!target) {
-  console.error(`不认识的平台：${process.argv[2]}。可选：${Object.keys(TARGETS).join('、')}`);
+const PRODUCT = 'MyRTA Rebook';
+const BUNDLE_ID = 'com.myrta.rebook';
+const targetName = (process.argv[2] ?? 'win-x64') as Target;
+if (!(targetName in ELECTRON_PLATFORMS)) {
+  console.error(`不认识的平台：${process.argv[2]}。可选：${Object.keys(ELECTRON_PLATFORMS).join('、')}`);
   process.exit(1);
 }
-const isWin = targetName.startsWith('win');
-const NODE_ZIP = `${target.dist}.${target.ext}`;
-// 各源速度差别大而且会变（镜像有时 8MB/s，有时只有 20KB/s），按顺序试，太慢就换下一个。
-// 内容完全相同，所以可以接着上一个源没下完的部分续传；最后统一用官方校验和核对
-const NODE_SOURCES = [
-  `https://nodejs.org/dist/${NODE_VERSION}/${NODE_ZIP}`,
-  `https://cdn.npmmirror.com/binaries/node/${NODE_VERSION}/${NODE_ZIP}`,
-  `https://mirrors.ustc.edu.cn/node/${NODE_VERSION}/${NODE_ZIP}`,
-];
-const SHASUMS_URL = `https://nodejs.org/dist/${NODE_VERSION}/SHASUMS256.txt`;
+const isWin = targetName === 'win-x64';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as { version: string };
+const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as { version: string; dependencies: Record<string, string> };
 const releaseDir = join(root, 'release');
-const cacheDir = join(releaseDir, 'cache');
-const outDir = join(releaseDir, targetName, 'myrta-rebook');
-const appDir = join(outDir, 'app');
-
-async function download(url: string, timeoutMs: number): Promise<Buffer> {
-  const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
-  if (!res.ok) throw new Error(`下载失败 ${res.status}：${url}`);
-  return Buffer.from(await res.arrayBuffer());
-}
-
-async function nodeZip(): Promise<string> {
-  const path = join(cacheDir, NODE_ZIP);
-  const sums = (await download(SHASUMS_URL, 60_000)).toString('utf8');
-  const expected = new RegExp(`^([0-9a-f]{64})\\s+${NODE_ZIP.replace(/\./g, '\\.')}$`, 'm').exec(sums)?.[1];
-  if (!expected) throw new Error(`SHASUMS256.txt 里没有 ${NODE_ZIP}`);
-  const sha = (b: Buffer) => createHash('sha256').update(b).digest('hex');
-
-  if (existsSync(path) && sha(readFileSync(path)) === expected) return path;
-  mkdirSync(cacheDir, { recursive: true });
-  const part = `${path}.part`;
-  // 上次已经下完但没来得及改名：续传时服务器会报范围错误，所以先查一次
-  if (existsSync(part) && sha(readFileSync(part)) === expected) {
-    renameSync(part, path);
-    return path;
-  }
-  for (const url of NODE_SOURCES) {
-    console.log(`下载 ${url}`);
-    try {
-      // -C - 续传；连续 30 秒低于 100KB/s 就放弃这个源
-      execFileSync('curl', ['-fL', '-C', '-', '--retry', '2', '--speed-limit', '100000', '--speed-time', '30', '-o', part, url], { stdio: 'inherit' });
-    } catch {
-      console.log('这个源太慢或失败，换下一个');
-      continue;
-    }
-    if (sha(readFileSync(part)) !== expected) {
-      rmSync(part, { force: true });
-      throw new Error('node 压缩包校验失败，已删除，没有使用');
-    }
-    renameSync(part, path);
-    return path;
-  }
-  throw new Error('所有下载源都失败了。可以稍后重试，已下载的部分会续传');
-}
+const outDir = join(releaseDir, targetName, PRODUCT);
 
 /** package-lock 里非开发依赖的包目录 */
 function productionPackages(): string[] {
@@ -92,61 +37,116 @@ function productionPackages(): string[] {
     .map(([k]) => k);
 }
 
-// Windows：换行用 CRLF；chcp 65001 让命令行按 UTF-8 显示中文。
-// 运行时数据放在 app 外面，升级时只替换 app 和 node 文件夹，学员数据不丢
-const BAT = [
-  '@echo off',
-  'chcp 65001 >nul',
-  'cd /d "%~dp0"',
-  'set "MYRTA_RUNTIME_DIR=%~dp0runtime"',
-  '"%~dp0node\\node.exe" --disable-warning=ExperimentalWarning "%~dp0app\\src\\main.ts"',
-  'if errorlevel 1 pause',
-  '',
-].join('\r\n');
-
-// Mac：双击 .command 会在"终端"里运行。关掉终端窗口，软件随之退出
-const COMMAND = [
-  '#!/bin/bash',
-  'cd "$(dirname "$0")" || exit 1',
-  'export MYRTA_RUNTIME_DIR="$PWD/runtime"',
-  '# 从网上下载的文件会被系统标记隔离，自带的 node 会被拦住，这里去掉本文件夹里的标记',
-  'xattr -dr com.apple.quarantine . 2>/dev/null',
-  './node/node --disable-warning=ExperimentalWarning app/src/main.ts',
-  'code=$?',
-  'if [ $code -ne 0 ]; then read -r -p "按回车键关闭窗口" _; fi',
-  'exit $code',
-  '',
-].join('\n');
-
-const archiveFile = await nodeZip();
-rmSync(outDir, { recursive: true, force: true });
-mkdirSync(join(outDir, 'node'), { recursive: true });
-
-// Windows 10 以上和 macOS 自带的 tar 都能解 zip 和 tar.gz
-const tmp = join(cacheDir, 'unpack');
-rmSync(tmp, { recursive: true, force: true });
-mkdirSync(tmp, { recursive: true });
-execFileSync('tar', ['-xf', archiveFile, '-C', tmp, ...target.files.map((f) => `${target.dist}/${f}`)]);
-for (const f of target.files) cpSync(join(tmp, target.dist, f), join(outDir, 'node', f.split('/').at(-1)!));
-rmSync(tmp, { recursive: true, force: true });
-if (!isWin) chmodSync(join(outDir, 'node', 'node'), 0o755);
-
-cpSync(join(root, 'src'), join(appDir, 'src'), { recursive: true });
-cpSync(join(root, 'data'), join(appDir, 'data'), { recursive: true, filter: (p) => !p.includes(`${join(root, 'data', 'local')}`) });
-cpSync(join(root, 'package.json'), join(appDir, 'package.json'));
-const pkgs = productionPackages();
-for (const p of pkgs) cpSync(join(root, p), join(appDir, p), { recursive: true });
-const guide = join(root, 'docs', 'user-guide.md');
-if (isWin) {
-  writeFileSync(join(outDir, '启动.bat'), BAT);
-  // 加 BOM：旧版记事本没有 BOM 会把 UTF-8 当成 GBK，中文乱码
-  if (existsSync(guide)) writeFileSync(join(outDir, '使用手册.txt'), '\uFEFF' + readFileSync(guide, 'utf8').replace(/\r?\n/g, '\r\n'));
-} else {
-  writeFileSync(join(outDir, '启动.command'), COMMAND, { mode: 0o755 });
-  if (existsSync(guide)) writeFileSync(join(outDir, '使用手册.txt'), readFileSync(guide, 'utf8'));
+/** 应用代码 → resources/app */
+function copyApp(appDir: string): void {
+  mkdirSync(appDir, { recursive: true });
+  cpSync(join(root, 'src'), join(appDir, 'src'), { recursive: true, filter: (p) => !p.endsWith('.d.ts') || p.includes('public') });
+  cpSync(join(root, 'data'), join(appDir, 'data'), { recursive: true, filter: (p) => !p.startsWith(join(root, 'data', 'local')) });
+  cpSync(join(root, 'assets'), join(appDir, 'assets'), { recursive: true });
+  // 只留运行需要的字段
+  const appPkg = { name: 'myrta-rebook', productName: PRODUCT, version: pkg.version, private: true, type: 'module', main: 'src/electron/main.ts', dependencies: pkg.dependencies };
+  writeFileSync(join(appDir, 'package.json'), JSON.stringify(appPkg, null, 2) + '\n');
+  for (const p of productionPackages()) cpSync(join(root, p), join(appDir, p), { recursive: true });
 }
 
-console.log(`已生成 ${outDir}（依赖：${pkgs.map((p) => p.replace('node_modules/', '')).join(', ')}）`);
+function guide(): string | null {
+  const zh = join(root, 'docs', 'user-guide.md');
+  const en = join(root, 'docs', 'user-guide.en.md');
+  if (!existsSync(zh)) return null;
+  return readFileSync(zh, 'utf8') + (existsSync(en) ? `\n\n---\n\n${readFileSync(en, 'utf8')}` : '');
+}
+
+async function buildWindows(): Promise<void> {
+  const { NtExecutable, NtExecutableResource, Data, Resource } = await import('resedit');
+  unzip(await electronZip(targetName), outDir);
+  rmSync(join(outDir, 'resources', 'default_app.asar'), { force: true });
+  copyApp(join(outDir, 'resources', 'app'));
+
+  // 改 exe 的图标和版本信息（文件属性里看到的名称），然后改名
+  const exePath = join(outDir, 'electron.exe');
+  const exe = NtExecutable.from(readFileSync(exePath), { ignoreCert: true });
+  const res = NtExecutableResource.from(exe);
+  const ico = Data.IconFile.from(readFileSync(join(root, 'assets', 'icon.ico')));
+  const iconGroups = Resource.IconGroupEntry.fromEntries(res.entries);
+  const groupId = iconGroups[0]?.id ?? 1;
+  const lang = iconGroups[0]?.lang ?? 1033;
+  Resource.IconGroupEntry.replaceIconsForResource(res.entries, groupId, lang, ico.icons.map((i) => i.data));
+  const [vi] = Resource.VersionInfo.fromEntries(res.entries);
+  if (vi) {
+    const v = pkg.version.split('.').map(Number) as [number, number, number];
+    vi.setFileVersion(v[0], v[1], v[2], 0, 1033);
+    vi.setProductVersion(v[0], v[1], v[2], 0, 1033);
+    for (const l of vi.getAllLanguagesForStringValues()) {
+      vi.setStringValues(l, {
+        FileDescription: PRODUCT,
+        ProductName: PRODUCT,
+        InternalName: PRODUCT,
+        OriginalFilename: `${PRODUCT}.exe`,
+        CompanyName: PRODUCT,
+        FileVersion: pkg.version,
+        ProductVersion: pkg.version,
+        LegalCopyright: '',
+      });
+    }
+    vi.outputToResourceEntries(res.entries);
+  }
+  res.outputResource(exe);
+  writeFileSync(join(outDir, `${PRODUCT}.exe`), Buffer.from(exe.generate()));
+  rmSync(exePath);
+
+  const g = guide();
+  // 加 BOM：旧版记事本没有 BOM 会把 UTF-8 当成 GBK，中文乱码
+  if (g) writeFileSync(join(outDir, '使用手册 User Guide.txt'), '\uFEFF' + g.replace(/\r?\n/g, '\r\n'));
+}
+
+async function buildMac(): Promise<void> {
+  unzip(await electronZip(targetName), outDir);
+  const app = join(outDir, `${PRODUCT}.app`);
+  renameSync(join(outDir, 'Electron.app'), app);
+  const res = join(app, 'Contents', 'Resources');
+  rmSync(join(res, 'default_app.asar'), { force: true });
+  copyApp(join(res, 'app'));
+  cpSync(join(root, 'assets', 'icon.icns'), join(res, 'app.icns'));
+  rmSync(join(res, 'electron.icns'), { force: true });
+
+  // 改 Info.plist：名称、Bundle ID、版本、图标；去掉 default_app.asar 的完整性校验（已删除该文件）
+  const plist = join(app, 'Contents', 'Info.plist');
+  const set = (key: string, value: string) => execFileSync('/usr/libexec/PlistBuddy', ['-c', `Set :${key} ${value}`, plist]);
+  set('CFBundleName', PRODUCT);
+  set('CFBundleDisplayName', PRODUCT);
+  set('CFBundleIdentifier', BUNDLE_ID);
+  set('CFBundleShortVersionString', pkg.version);
+  set('CFBundleVersion', pkg.version);
+  set('CFBundleIconFile', 'app.icns');
+  set('LSApplicationCategoryType', 'public.app-category.productivity');
+  try {
+    execFileSync('/usr/libexec/PlistBuddy', ['-c', 'Delete :ElectronAsarIntegrity', plist]);
+  } catch {
+    // 没有这一项
+  }
+  // 用不到摄像头、麦克风、蓝牙，去掉这些权限说明
+  for (const k of ['NSCameraUsageDescription', 'NSMicrophoneUsageDescription', 'NSBluetoothAlwaysUsageDescription', 'NSBluetoothPeripheralUsageDescription']) {
+    try {
+      execFileSync('/usr/libexec/PlistBuddy', ['-c', `Delete :${k}`, plist]);
+    } catch {
+      // 没有这一项
+    }
+  }
+  // 改了 Info.plist 和资源，原来的签名失效。Apple 芯片的 Mac 不允许运行没有签名的程序，重新做本机临时签名（不是开发者签名）
+  if (process.platform === 'darwin') execFileSync('codesign', ['--force', '--deep', '--sign', '-', app]);
+  const g = guide();
+  if (g) writeFileSync(join(outDir, '使用手册 User Guide.txt'), g);
+}
+
+if (!isWin && process.platform !== 'darwin') {
+  console.error('Mac 版只能在 macOS 上打包（要用 PlistBuddy 和 codesign）');
+  process.exit(1);
+}
+rmSync(outDir, { recursive: true, force: true });
+mkdirSync(outDir, { recursive: true });
+if (isWin) await buildWindows();
+else await buildMac();
+console.log(`已生成 ${outDir}`);
 
 const archive = join(releaseDir, `myrta-rebook-${pkg.version}-${targetName}.zip`);
 const n = zipDir(outDir, archive);
