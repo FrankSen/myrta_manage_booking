@@ -127,6 +127,16 @@ export class Repo {
     this.db.prepare('UPDATE offers SET state = ? WHERE id = ?').run(state, id);
   }
 
+  /** 程序自己用的小数据（如授权检查记录的最晚时间） */
+  getMeta(key: string): string | null {
+    const row = this.db.prepare('SELECT value FROM meta WHERE key = ?').get(key) as Row | undefined;
+    return row ? (row.value as string) : null;
+  }
+
+  setMeta(key: string, value: string): void {
+    this.db.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(key, value);
+  }
+
   log(studentId: number | null, level: LogLevel, msg: string, nowMs: number): void {
     this.db.prepare('INSERT INTO logs (at, student_id, level, msg) VALUES (?, ?, ?, ?)').run(nowMs, studentId, level, msg);
   }

@@ -21,6 +21,8 @@ export interface ServiceDeps {
   random?: () => number;
   /** 全局刷新间隔改了之后保存，返回前不应抛错以外的异常 */
   saveGlobalInterval?: (ms: number) => void;
+  /** 授权是否有效。无效时到点不访问站点（学员状态不变，续期后自动继续）。默认有效 */
+  allowed?: () => boolean;
 }
 
 export interface Progress {
@@ -188,6 +190,11 @@ export class Service {
 
   private runCheck(id: number): Promise<void> {
     return this.withLock(id, async () => {
+      if (this.deps.allowed && !this.deps.allowed()) {
+        // 试用到期：不访问站点、不算轮数，关掉浏览器；状态保持"刷新中"，续期后下一轮自动继续
+        await this.dropSession(id);
+        return;
+      }
       this.phases.set(id, '准备');
       let outcome;
       try {

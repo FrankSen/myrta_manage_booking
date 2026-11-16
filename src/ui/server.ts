@@ -9,6 +9,7 @@ import type { Service } from '../engine/service.ts';
 import { describeEvent, type UiMessage } from '../notify/notifier.ts';
 import type { BookingInfo } from '../domain/types.ts';
 import type { Repo, Student } from '../storage/repo.ts';
+import type { LicenseState } from '../license/license.ts';
 import { INTERVAL_CHOICES_MIN, INTERVAL_HELP } from '../config/interval.ts';
 import { DEFAULT_TOLERANCE, refreshDeadline } from '../domain/matcher.ts';
 import { MAX_CENTRES, ValidationError, parseInterval, parseNewStudent, parseTarget } from './validate.ts';
@@ -25,6 +26,8 @@ export interface UiDeps {
   /** 日期容差，算"还能刷新到什么时候"用，和引擎一致 */
   maxDateDays?: number;
   now(): number;
+  /** 授权。没有时不检查（测试用） */
+  license?: { state(): LicenseState; import(text: string): LicenseState };
   /** 用系统默认浏览器打开 myrta.com，让教练手动改约。测试时替换 */
   openSite?: () => void;
 }
@@ -72,6 +75,19 @@ export function publicStudent(s: Student, service?: Pick<Service, 'progress' | '
     status: s.status,
     statusNote: s.statusNote,
   };
+}
+
+const LICENSE_TEXT: Record<Exclude<LicenseState, { ok: true }>['reason'], string> = {
+  missing: '还没有导入授权文件，请联系开发者获取',
+  invalid: '授权文件无效（可能被修改过），请联系开发者重新获取',
+  expired: '试用已到期，请联系开发者续期',
+  clock_back: '电脑时间比上次使用时早，请把电脑时间改回正确的时间',
+};
+
+function publicLicense(s: LicenseState) {
+  return s.ok
+    ? { ok: true, name: s.name, until: s.until }
+    : { ok: false, reason: s.reason, message: LICENSE_TEXT[s.reason], name: s.name ?? null, until: s.until ?? null };
 }
 
 function tokenOk(given: string | null | undefined, token: string): boolean {
@@ -147,8 +163,25 @@ export async function startUiServer(deps: UiDeps, opts: { port?: number; token?:
     const path = url.pathname;
     let m: RegExpExecArray | null;
 
+    const licenseState = (): LicenseState => deps.license?.state() ?? { ok: true, name: '', until: '', expiresAt: Infinity };
+    if (method === 'GET' && path === '/api/license') return send(res, 200, publicLicense(licenseState()));
+    if (method === 'POST' && path === '/api/license') {
+      const body = (await readJson(req)) as { text?: unknown };
+      if (!deps.license) return send(res, 400, { error: '这个版本不需要授权' });
+      if (typeof body.text !== 'string') throw new ValidationError('请选择授权文件');
+      const s = deps.license.import(body.text);
+      return send(res, s.ok ? 200 : 400, s.ok ? publicLicense(s) : { error: LICENSE_TEXT[s.reason], license: publicLicense(s) });
+    }
+    // 会访问站点的操作，授权无效时一律拒绝；查看类接口照常可用
+    const needsLicense = method !== 'GET' && (/^\/api\/students(\/\d+\/start)?$/.test(path) && method === 'POST' || /^\/api\/offers\/\d+\/accept$/.test(path));
+    if (needsLicense) {
+      const s = licenseState();
+      if (!s.ok) return send(res, 403, { error: LICENSE_TEXT[s.reason], license: publicLicense(s) });
+    }
+
     if (method === 'GET' && path === '/api/state') {
       return send(res, 200, {
+        license: publicLicense(licenseState()),
         centres: deps.centreList.map((c) => ({ id: c.id, name: c.name, suburb: c.suburb, postcode: c.postcode })),
         autoRebookEnabled: deps.autoRebookEnabled,
         messages: recentMessages,

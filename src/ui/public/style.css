@@ -25,7 +25,8 @@
 }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
-body { margin: 0; font: 15px/1.55 -apple-system, "PingFang SC", "Segoe UI", "Microsoft YaHei", sans-serif; color: var(--text); background: var(--bg); }
+/* 中文字体：macOS 自带苹方，Windows 10/11（任何系统语言，包括英文版）自带微软雅黑 */
+body { margin: 0; font: 15px/1.55 -apple-system, "PingFang SC", "Segoe UI", "Microsoft YaHei", "Microsoft JhengHei", "SimSun", sans-serif; color: var(--text); background: var(--bg); }
 
 /* 顶栏：路牌 */
 .topbar { display: flex; align-items: center; gap: 14px; padding: 12px 22px; background: var(--sign); color: #fff; }
@@ -71,6 +72,7 @@ button:disabled { opacity: .5; cursor: default; }
 .light.wait, .dot.amber { background: var(--wait); }
 .light.stop { background: var(--stop); }
 .light.info { background: var(--info); }
+.dot.red { background: var(--stop); }
 .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
 
 /* 需要处理 */
@@ -189,3 +191,10 @@ legend { font-weight: 600; padding: 0 4px; }
   .arrow { transform: rotate(90deg); }
   .time-grid { grid-template-columns: 1fr; }
 }
+
+/* 授权 */
+.license { border-left: 6px solid var(--stop); }
+.file-btn { display: inline-block; padding: 6px 16px; border-radius: 8px; cursor: pointer; }
+.file-btn.primary { background: var(--sign); color: #fff; font-weight: 600; }
+.file-btn.primary:hover { background: var(--sign-dark); }
+.license-tag { font-size: 12px; opacity: .85; white-space: nowrap; }

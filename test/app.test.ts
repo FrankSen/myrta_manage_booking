@@ -286,3 +286,33 @@ describe('保存刷新间隔', () => {
     expect(loadSettings(join(d, 'settings.json')).hidden.checkIntervalMs).toBe(10 * 60_000);
   });
 });
+
+describe('试用授权', () => {
+  const settings = { ...DEFAULT_SETTINGS, hidden: { ...DEFAULT_SETTINGS.hidden, globalMinGapMs: 1 } };
+  test('没有授权：可以查看，不能添加学员；导入后可以', async () => {
+    const { generateKeyPairSync, sign } = await import('node:crypto');
+    const { payload } = await import('../src/license/license.ts');
+    const { publicKey, privateKey } = generateKeyPairSync('ed25519');
+    const body = { name: '测试', until: '2099-12-31', issuedAt: '2026-11-16' };
+    const text = JSON.stringify({ ...body, sig: sign(null, payload(body), privateKey).toString('base64') });
+    const d = dir();
+    let opened = 0;
+    app = await startApp({
+      runtimeDir: d, centresFile, openWindow: () => null, settings, requireLicense: true,
+      licensePublicKey: publicKey.export({ type: 'spki', format: 'der' }).toString('base64'),
+      openSession: async () => { opened++; return new FakeSession(); },
+    });
+    const call = (method: string, path: string, b?: unknown) =>
+      fetch(`http://127.0.0.1:${app!.ui.port}${path}`, { method, headers: { 'X-Token': app!.ui.token, 'Content-Type': 'application/json' }, body: b === undefined ? undefined : JSON.stringify(b) });
+    expect((await call('GET', '/api/students')).status).toBe(200);
+    const st = (await (await call('GET', '/api/state')).json()) as { license: { ok: boolean; reason: string } };
+    expect(st.license).toMatchObject({ ok: false, reason: 'missing' });
+    const denied = await call('POST', '/api/students', { label: 'A', bookingId: '1234567890', surname: 'Testsurname' });
+    expect(denied.status).toBe(403);
+    expect(opened).toBe(0);
+    expect((await call('POST', '/api/license', { text: '{"bad":1}' })).status).toBe(400);
+    expect((await call('POST', '/api/license', { text })).status).toBe(200);
+    expect(existsSync(join(d, 'license.json'))).toBe(true);
+    expect((await call('POST', '/api/students', { label: 'A', bookingId: '1234567890', surname: 'Testsurname' })).status).toBe(201);
+  });
+});

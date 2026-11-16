@@ -17,10 +17,18 @@
   <button id="btn-interval" class="sign-btn" title="刷新设置">⏱ <span id="interval-label"></span></button>
   <div class="sign" id="mode"></div>
   <button id="btn-notify" class="ghost" hidden>开启桌面通知</button>
+  <div class="license-tag" id="license-tag" hidden></div>
 </header>
 <div class="road"></div>
 
 <main>
+  <section id="license-box" class="panel license" hidden>
+    <h2><span class="dot red"></span><span id="license-msg"></span></h2>
+    <p class="hint">已有的学员和记录可以查看，但不会刷新，也不能添加学员。导入有效的授权文件后，之前在刷新的学员会自动继续。</p>
+    <label class="file-btn primary">导入授权文件<input type="file" id="license-file" accept=".json,application/json" hidden></label>
+    <p class="error" id="license-error"></p>
+  </section>
+
   <section class="stats" id="stats"></section>
 
   <section id="todo-box" class="panel todo" hidden>

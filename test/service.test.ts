@@ -10,7 +10,7 @@ import { FakeSession, NOW, SILVERWATER, baseTarget, centres, slot } from './help
 
 const MIN = 60_000;
 
-function setup(settings: Partial<Settings> = {}) {
+function setup(settings: Partial<Settings> = {}, allowed?: () => boolean) {
   const repo = new Repo(openDb(':memory:'), randomBytes(32));
   const clock = new FakeClock(NOW);
   const sessions = new Map<number, FakeSession>();
@@ -26,6 +26,7 @@ function setup(settings: Partial<Settings> = {}) {
     },
     notify: (e) => events.push(e),
     random: () => 0.5,
+    allowed,
   });
   const addStudent = (label = 'S') =>
     repo.addStudent({
@@ -410,5 +411,27 @@ describe('预计刷新周期', () => {
     const b = t.addStudent('B');
     t.service.startStudent(a);
     expect(t.service.expectedCycle(b)).toBe(Math.max(MIN + 15_000 + 70_000, 4 * 20_000));
+  });
+});
+
+describe('授权到期', () => {
+  test('到期后到点不访问站点、不算轮数，状态保持刷新中；续期后下一轮继续', async () => {
+    let ok = true;
+    const t = setup({}, () => ok);
+    const id = t.addStudent();
+    t.service.startStudent(id);
+    await t.clock.advance(0);
+    const calls = t.sessions.get(id)!.calls.length;
+    expect(t.repo.getStudent(id)!.rounds).toBe(1);
+    ok = false;
+    await t.clock.advance(5 * MIN);
+    expect(t.sessions.get(id)!.calls.length).toBe(calls);
+    expect(t.sessions.get(id)!.closed).toBe(true);
+    expect(t.repo.getStudent(id)!.rounds).toBe(1);
+    expect(t.repo.getStudent(id)!.status).toBe('running');
+    ok = true;
+    await t.clock.advance(5 * MIN);
+    expect(t.repo.getStudent(id)!.rounds).toBeGreaterThan(1);
+    await t.service.stopAll();
   });
 });

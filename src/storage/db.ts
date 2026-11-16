@@ -24,6 +24,10 @@ CREATE TABLE IF NOT EXISTS offers (
   state       TEXT NOT NULL DEFAULT 'open',
   UNIQUE (student_id, centre_id, date, time)
 );
+CREATE TABLE IF NOT EXISTS meta (
+  key    TEXT PRIMARY KEY,
+  value  TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS logs (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   at          INTEGER NOT NULL,

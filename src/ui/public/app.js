@@ -417,6 +417,27 @@ $('#form-interval').addEventListener('submit', async (ev) => {
   } catch (e) { $('#interval-error').textContent = e.message; }
 });
 
+// ---------- 授权 ----------
+
+function renderLicense(l) {
+  state.license = l;
+  $('#license-box').hidden = l.ok;
+  $('#license-msg').textContent = l.ok ? '' : l.message;
+  const tag = $('#license-tag');
+  tag.hidden = !l.ok || !l.until;
+  if (l.ok && l.until) tag.textContent = `试用至 ${l.until}`;
+}
+$('#license-file').onchange = async (ev) => {
+  const file = ev.target.files[0];
+  ev.target.value = '';
+  if (!file) return;
+  $('#license-error').textContent = '';
+  try {
+    renderLicense(await api('POST', '/api/license', { text: await file.text() }));
+    await reload();
+  } catch (e) { $('#license-error').textContent = e.message; }
+};
+
 // ---------- 桌面通知与启动 ----------
 
 function notify(msg) {
@@ -432,11 +453,14 @@ try {
   mode.textContent = state.autoRebookEnabled ? '自动改约：已开启' : '自动改约：未开启 · 只走到确认页';
   mode.className = `sign ${state.autoRebookEnabled ? 'on' : 'off'}`;
   renderIntervalLabel();
+  renderLicense(state.license);
   $('#btn-notify').hidden = !('Notification' in window) || Notification.permission === 'granted';
   await reload();
   const es = new EventSource(`/api/events?t=${encodeURIComponent(token)}`);
   es.addEventListener('message', async (e) => { notify(JSON.parse(e.data)); await reload(); });
   setInterval(reload, 30000);
+  // 到期时间到了要立刻显示，不等重启
+  setInterval(async () => { try { renderLicense(await api('GET', '/api/license')); } catch { /* 下次再试 */ } }, 60000);
   setInterval(tick, 1000);
 } catch (e) {
   document.body.innerHTML = `<p style="padding:20px">打不开：${esc(e.message)}。请用软件启动的窗口，不要手动改地址。</p>`;

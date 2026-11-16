@@ -13,6 +13,7 @@ import { Repo } from '../storage/repo.ts';
 import { startUiServer, type UiServer } from '../ui/server.ts';
 import { QUIET_ARGS, realFindBrowser } from '../site/browser.ts';
 import { acquireLock } from './lock.ts';
+import { LicenseGate } from '../license/gate.ts';
 import { runtimePaths } from './paths.ts';
 import { loadSettings, saveCheckInterval } from './settings-file.ts';
 
@@ -33,6 +34,10 @@ export interface AppOptions {
   warn?: (message: string) => void;
   clock?: Clock;
   port?: number;
+  /** 是否检查试用授权。正式入口（Electron、npm start）为 true；测试默认不检查 */
+  requireLicense?: boolean;
+  /** 测试用：替换验证公钥 */
+  licensePublicKey?: string;
 }
 
 export interface App {
@@ -40,6 +45,7 @@ export interface App {
   repo: Repo;
   ui: UiServer;
   settings: Settings;
+  license: LicenseGate | null;
   stop(): Promise<void>;
 }
 
@@ -65,6 +71,7 @@ export async function startApp(opts: AppOptions): Promise<App> {
     closers.push(() => db.close());
     const repo = new Repo(db, loadOrCreateKey(paths.key));
     const limiter = new Limiter(clock, settings.hidden);
+    const license = opts.requireLicense ? new LicenseGate({ path: paths.license, repo, now: () => clock.now(), publicKey: opts.licensePublicKey }) : null;
 
     const probeDir = `${paths.browserProfiles}/probe`;
     // 读取成功后，probe 目录改名留给这个学员用，不用再新建一个浏览器资料目录（新建时浏览器会写一大批文件，
@@ -89,12 +96,14 @@ export async function startApp(opts: AppOptions): Promise<App> {
       openSession: (id) => opts.openSession(id, `${paths.browserProfiles}/${id}`),
       notify: (e) => ui?.publish(e),
       saveGlobalInterval: (ms) => saveCheckInterval(paths.settings, ms),
+      allowed: license ? () => license.ok() : undefined,
     });
     closers.push(() => service.stopAll());
 
     ui = await startUiServer(
       {
         repo, service, centreList,
+        license: license ?? undefined,
         autoRebookEnabled: settings.autoRebookEnabled,
         maxDateDays: settings.tolerance.maxDateDays,
         now: () => clock.now(),
@@ -152,7 +161,7 @@ export async function startApp(opts: AppOptions): Promise<App> {
     if (child) closers.push(() => void child.kill());
 
     return {
-      service, repo, ui: server, settings,
+      service, repo, ui: server, settings, license,
       stop: async () => {
         await undo();
       },
