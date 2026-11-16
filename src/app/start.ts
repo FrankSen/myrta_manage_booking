@@ -1,4 +1,4 @@
-import { readFileSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, renameSync, rmSync } from 'node:fs';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { indexCentres } from '../domain/geo.ts';
 import type { BookingInfo, Centre } from '../domain/types.ts';
@@ -67,6 +67,14 @@ export async function startApp(opts: AppOptions): Promise<App> {
     const limiter = new Limiter(clock, settings.hidden);
 
     const probeDir = `${paths.browserProfiles}/probe`;
+    // 读取成功后，probe 目录改名留给这个学员用，不用再新建一个浏览器资料目录（新建时浏览器会写一大批文件，
+    // 有的电脑安全软件会把这些当成"下载"一直弹窗）。键是 Booking number，只在内存里
+    const pendingProfiles = new Map<string, string>();
+    let pendingSeq = 0;
+    // 上次没来得及认领的目录（程序在添加学员中途退出）
+    for (const name of existsSync(paths.browserProfiles) ? readdirSync(paths.browserProfiles) : []) {
+      if (name.startsWith('pending-')) rmSync(`${paths.browserProfiles}/${name}`, { recursive: true, force: true });
+    }
     let probeQueue: Promise<unknown> = Promise.resolve();
     let probeSession: SiteSession | null = null;
     const probeAbort = new AbortController();
@@ -99,15 +107,38 @@ export async function startApp(opts: AppOptions): Promise<App> {
             if (probeAbort.signal.aborted) throw new Error('程序正在退出');
             const session = await opts.openSession(null, probeDir);
             probeSession = session;
+            let info: BookingInfo;
             try {
-              return await session.login(bookingId, surname);
+              info = await session.login(bookingId, surname);
             } finally {
               probeSession = null;
               await session.close();
             }
+            const pending = `${paths.browserProfiles}/pending-${++pendingSeq}`;
+            try {
+              renameSync(probeDir, pending);
+              const old = pendingProfiles.get(bookingId);
+              if (old) rmSync(old, { recursive: true, force: true });
+              pendingProfiles.set(bookingId, pending);
+            } catch {
+              // 改名失败（例如文件被占用）不影响添加，下次读取前会清空
+            }
+            return info;
           });
           probeQueue = run.catch(() => {});
           return run;
+        },
+        adoptProfile: (studentId, bookingId) => {
+          const pending = pendingProfiles.get(bookingId);
+          if (!pending) return;
+          pendingProfiles.delete(bookingId);
+          const dest = `${paths.browserProfiles}/${studentId}`;
+          try {
+            if (existsSync(dest)) rmSync(pending, { recursive: true, force: true });
+            else renameSync(pending, dest);
+          } catch {
+            rmSync(pending, { recursive: true, force: true });
+          }
         },
       },
       { port: opts.port },

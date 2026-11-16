@@ -160,6 +160,34 @@ describe('添加学员时的临时读取', () => {
     expect(dirs).toEqual([join(d, 'browser-profile', 'probe'), join(d, 'browser-profile', 'probe')]);
   });
 
+  test('读取成功后，资料目录改名给这个学员用；失败时不留下', async () => {
+    const d = dir();
+    let n = 0;
+    app = await startApp({
+      runtimeDir: d, centresFile, openWindow: () => null, settings,
+      openSession: async (_id, profileDir) => {
+        mkdirSync(profileDir, { recursive: true });
+        writeFileSync(join(profileDir, 'cookie'), 'x');
+        const s = new FakeSession();
+        if (n++ === 1) s.loginError = new Error('坏了');
+        return s;
+      },
+    });
+    const created = (await (await post(app, '1234567890')).json()) as { id: number };
+    expect(existsSync(join(d, 'browser-profile', String(created.id), 'cookie'))).toBe(true);
+    expect(existsSync(join(d, 'browser-profile', 'probe'))).toBe(false);
+    expect((await post(app, '1234567891')).status).toBe(422);
+    const { readdirSync } = await import('node:fs');
+    expect(readdirSync(join(d, 'browser-profile')).filter((x) => x.startsWith('pending-'))).toEqual([]);
+  });
+
+  test('启动时清掉上次没认领的目录', async () => {
+    const d = dir();
+    mkdirSync(join(d, 'browser-profile', 'pending-3'), { recursive: true });
+    app = await startApp({ runtimeDir: d, centresFile, openWindow: () => null, settings, openSession: async () => new FakeSession() });
+    expect(existsSync(join(d, 'browser-profile', 'pending-3'))).toBe(false);
+  });
+
   test('前一次读取失败，不影响下一次', async () => {
     const d = dir();
     let n = 0;

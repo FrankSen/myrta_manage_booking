@@ -19,6 +19,8 @@ export interface UiDeps {
   centreList: readonly Centre[];
   /** 新增学员时登录一次读取当前预约。失败抛错，错误信息会返回给教练 */
   fetchCurrent(bookingId: string, surname: string): Promise<BookingInfo>;
+  /** 学员建好后，把刚才读取用的浏览器资料目录交给这个学员继续用 */
+  adoptProfile?: (studentId: number, bookingId: string) => void;
   autoRebookEnabled: boolean;
   /** 日期容差，算"还能刷新到什么时候"用，和引擎一致 */
   maxDateDays?: number;
@@ -174,6 +176,7 @@ export async function startUiServer(deps: UiDeps, opts: { port?: number; token?:
         current,
         target: { centreIds: centre ? [centre.id] : [], dateFrom: current.date, dateTo: current.date, timeFrom: '08:00', timeTo: '17:00' },
       });
+      deps.adoptProfile?.(id, input.bookingId);
       return send(res, 201, publicStudent(deps.repo.getStudent(id)!, deps.service, deps.maxDateDays));
     }
     if ((m = /^\/api\/students\/(\d+)\/target$/.exec(path)) && method === 'PUT') {
