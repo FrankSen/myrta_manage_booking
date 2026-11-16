@@ -435,3 +435,24 @@ describe('授权到期', () => {
     await t.service.stopAll();
   });
 });
+
+describe('rebookingIds', () => {
+  test('走到确认页的过程中算"正在改约"，结束后不算', async () => {
+    const t = setup();
+    const id = t.addStudent();
+    t.service.startStudent(id);
+    await t.clock.advance(0);
+    // 第一轮没有考位；下一轮同一个会话出现完全符合的考位
+    const s = t.sessions.get(id)!;
+    let seen: number[] = [];
+    const orig = s.reachConfirm.bind(s);
+    s.reachConfirm = async (x) => { seen = t.service.rebookingIds(); return orig(x); };
+    s.slotsByCentre.set(SILVERWATER, [slot(SILVERWATER, '2026-11-17', '10:00')]);
+    expect(t.service.rebookingIds()).toEqual([]);
+    await t.clock.advance(2 * MIN);
+    expect(seen).toEqual([id]);
+    expect(t.repo.getStudent(id)!.status).toBe('pending_confirm');
+    expect(t.service.rebookingIds()).toEqual([]);
+    await t.service.stopAll();
+  });
+});

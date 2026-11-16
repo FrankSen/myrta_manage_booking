@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, readdirSync, renameSync, rmSync } from 'node:fs';
-import { spawn, type ChildProcess } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import { indexCentres } from '../domain/geo.ts';
 import type { BookingInfo, Centre } from '../domain/types.ts';
 import { Service } from '../engine/service.ts';
@@ -11,7 +11,6 @@ import { loadOrCreateKey } from '../storage/crypto.ts';
 import { openDb } from '../storage/db.ts';
 import { Repo } from '../storage/repo.ts';
 import { startUiServer, type UiServer } from '../ui/server.ts';
-import { QUIET_ARGS, realFindBrowser } from '../site/browser.ts';
 import { acquireLock } from './lock.ts';
 import { LicenseGate } from '../license/gate.ts';
 import { TextError, msg, render, type Lang, type Text } from '../i18n.ts';
@@ -23,8 +22,8 @@ export interface AppOptions {
   centresFile: string;
   /** 为某个学员打开站点会话；studentId 为 null 表示"添加学员时临时读取一次" */
   openSession(studentId: number | null, profileDir: string): Promise<SiteSession>;
-  /** 打开界面窗口。默认用本机 Chrome/Edge 的 --app 模式；测试时传空函数 */
-  openWindow?: (url: string, profileDir: string) => ChildProcess | null;
+  /** 打开界面窗口（返回的子进程退出时一起结束）。默认不打开：Electron 自己开窗口，npm start 打印地址 */
+  openWindow?: (url: string) => ChildProcess | null;
   settings?: Settings;
   /**
    * 站点会话能否真正点 Finish。为 false 时即使配置开启了自动改约也强制关闭，
@@ -172,7 +171,7 @@ export async function startApp(opts: AppOptions): Promise<App> {
 
     service.resumeAll();
 
-    const child = (opts.openWindow ?? defaultOpenWindow)(server.url, paths.uiProfile);
+    const child = opts.openWindow?.(server.url) ?? null;
     if (child) closers.push(() => void child.kill());
 
     return {
@@ -186,16 +185,4 @@ export async function startApp(opts: AppOptions): Promise<App> {
     await undo();
     throw err;
   }
-}
-
-/** 用 Chrome 的 --app 模式打开界面：没有地址栏，看起来像独立窗口 */
-function defaultOpenWindow(url: string, profileDir: string): ChildProcess | null {
-  let exe: string;
-  try {
-    exe = realFindBrowser();
-  } catch {
-    console.log(`没有找到 Chrome 或 Edge，请手动用浏览器打开：${url}`);
-    return null;
-  }
-  return spawn(exe, [`--app=${url}`, `--user-data-dir=${profileDir}`, '--lang=zh-CN', '--no-first-run', '--no-default-browser-check', ...QUIET_ARGS], { stdio: 'ignore' });
 }

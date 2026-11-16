@@ -5,7 +5,8 @@ import type { Clock } from '../scheduler/clock.ts';
 import type { Limiter } from '../scheduler/limiter.ts';
 import { Scheduler } from '../scheduler/queue.ts';
 import type { SiteSession } from '../site/session.ts';
-import type { Repo, StudentStatus } from '../storage/repo.ts';
+import type { Repo, Student, StudentStatus } from '../storage/repo.ts';
+import type { Slot } from '../domain/types.ts';
 import { TextError, msg, type Text } from '../i18n.ts';
 import { expectedCycleMs } from '../config/interval.ts';
 import { checkStudent, newCheckState, reportError, rebookSlot, visitsPerRound, type CheckDeps, type NotifyEvent } from './checker.ts';
@@ -169,6 +170,11 @@ export class Service {
     return this.scheduler.activeIds();
   }
 
+  /** 正在走改约流程（选位到确认页、提交）的学员。退出程序会打断它们 */
+  rebookingIds(): number[] {
+    return [...this.phases].filter(([, p]) => typeof p === 'object' && !Array.isArray(p) && p.k === 'phase.confirm').map(([id]) => id);
+  }
+
   // ---- 内部 ----
 
   private checkDeps(): CheckDeps {
@@ -225,6 +231,16 @@ export class Service {
     }
 
     const deps = this.checkDeps();
+    try {
+      return await this.acceptChecked(offerId, student, slot, deps);
+    } finally {
+      this.phases.delete(student.id);
+    }
+  }
+
+  private async acceptChecked(offerId: number, student: Student, slot: Slot, deps: CheckDeps): Promise<AcceptResult> {
+    const { repo, limiter } = this.deps;
+    const offer = repo.getOffer(offerId)!;
     try {
       const session = await this.getSession(student.id);
       repo.setCurrent(student.id, await session.login(student.bookingId, student.surname));
