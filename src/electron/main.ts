@@ -44,7 +44,6 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 async function boot(): Promise<void> {
-  Menu.setApplicationMenu(process.platform === 'darwin' ? Menu.buildFromTemplate([{ role: 'appMenu' }, { role: 'editMenu' }, { role: 'windowMenu' }]) : null);
   try {
     core = await startApp({
       runtimeDir: dataDir,
@@ -54,7 +53,10 @@ async function boot(): Promise<void> {
       requireLicense: true,
       openWindow: () => null,
       warn: (m) => console.warn(render(lang, m)),
-      onLanguage: (l) => (lang = l),
+      onLanguage: (l) => {
+        lang = l;
+        setMenu();
+      },
     });
   } catch (err) {
     dialog.showErrorBox(t(lang, 'el.start_failed'), render(lang, errorText(err)));
@@ -62,6 +64,7 @@ async function boot(): Promise<void> {
     return;
   }
   lang = core.language();
+  setMenu();
   checkBrowser();
   firstRunShortcuts();
   openWindow(core.ui.url);
@@ -128,14 +131,31 @@ async function shutdown(): Promise<void> {
 }
 
 app.on('window-all-closed', () => void shutdown());
+// 不经过窗口的退出（系统关机/注销、进程收到 SIGTERM、Dock 里点"退出"）：不弹确认框，直接收尾。
+// 这时可能没人看着屏幕，弹框会卡住退出，学员的 Chrome 也关不掉
 app.on('before-quit', (e) => {
-  // Mac 的 Cmd+Q：走同样的确认流程
-  if (!quitting && win) {
-    e.preventDefault();
-    win.close();
-  }
+  if (quitting) return;
+  e.preventDefault();
+  void shutdown();
 });
-for (const sig of ['SIGINT', 'SIGTERM'] as const) process.on(sig, () => void shutdown());
+
+/** Mac 菜单。Cmd+Q 走关窗口的确认流程；Windows 不要菜单栏 */
+function setMenu(): void {
+  if (process.platform !== 'darwin') {
+    Menu.setApplicationMenu(null);
+    return;
+  }
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate([
+      {
+        label: PRODUCT,
+        submenu: [{ role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' }, { type: 'separator' }, { label: tr('el.quit'), accelerator: 'Command+Q', click: () => win?.close() }],
+      },
+      { role: 'editMenu' },
+      { role: 'windowMenu' },
+    ]),
+  );
+}
 
 /** 学员刷新要用本机 Chrome/Edge，没有就提示，界面照常打开 */
 function checkBrowser(): void {
