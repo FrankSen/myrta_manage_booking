@@ -1,3 +1,5 @@
+import { render, type Text } from '../src/i18n.ts';
+const zh = (notes: Text[]) => notes.map((n) => render('zh', n));
 import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'vitest';
 import { indexCentres } from '../src/domain/geo.ts';
@@ -51,7 +53,7 @@ describe('接近', () => {
   test('考点对，时间超出 60 分钟以内', () => {
     const r = run(slot(SILVERWATER, '2026-11-17', '13:00'));
     expect(r.kind).toBe('near');
-    expect(r.notes).toEqual(['时间超出目标时间段 60 分钟']);
+    expect(zh(r.notes)).toEqual(['时间超出目标时间段 60 分钟']);
   });
   test('时间超出 61 分钟 → 不符合', () => {
     expect(run(slot(SILVERWATER, '2026-11-17', '13:01')).kind).toBe('none');
@@ -59,7 +61,7 @@ describe('接近', () => {
   test('时间对，考点在 10 公里内', () => {
     const r = run(slot(BANKSTOWN, '2026-11-17', '10:00'));
     expect(r.kind).toBe('near');
-    expect(r.notes[0]).toMatch(/^距目标考点 9\.\d 公里$/);
+    expect(zh(r.notes)[0]).toMatch(/^距目标考点 9\.\d 公里$/);
   });
   test('考点超过 10 公里 → 不符合', () => {
     expect(run(slot(ROSELANDS, '2026-11-17', '10:00')).kind).toBe('none');
@@ -83,7 +85,7 @@ describe('日期偏差', () => {
     const tol = { ...DEFAULT_TOLERANCE, maxDateDays: 1 };
     const r = run(slot(SILVERWATER, '2026-11-21', '10:00'), tol);
     expect(r.kind).toBe('near');
-    expect(r.notes).toEqual(['日期超出目标范围 1 天']);
+    expect(zh(r.notes)).toEqual(['日期超出目标范围 1 天']);
     expect(run(slot(SILVERWATER, '2026-11-22', '10:00'), tol).kind).toBe('none');
   });
 });
@@ -107,10 +109,10 @@ describe('指定时间', () => {
     expect(r.kind).toBe('none'); // 离 08:00 120 分钟，离 13:30 210 分钟
     const r2 = ev(slot(SILVERWATER, '2026-11-17', '08:45'));
     expect(r2.kind).toBe('near');
-    expect(r2.notes).toEqual(['与指定时间相差 45 分钟']);
+    expect(zh(r2.notes)).toEqual(['与指定时间相差 45 分钟']);
   });
   test('取最近的指定时间', () => {
-    expect(ev(slot(SILVERWATER, '2026-11-17', '13:00')).notes).toEqual(['与指定时间相差 30 分钟']);
+    expect(zh(ev(slot(SILVERWATER, '2026-11-17', '13:00')).notes)).toEqual(['与指定时间相差 30 分钟']);
   });
   test('正好 60 分钟算接近，61 分钟不算', () => {
     expect(ev(slot(SILVERWATER, '2026-11-17', '14:30')).kind).toBe('near');

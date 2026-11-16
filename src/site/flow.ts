@@ -3,6 +3,7 @@ import { addDays, mondayOf, parseSiteDate, slotCellTime, weekdayKey } from '../d
 import type { BookingInfo, LocalDate, Slot } from '../domain/types.ts';
 import { launchBrowser, type BrowserHandle } from './browser.ts';
 import { SiteError } from './errors.ts';
+import { errorText, msg } from '../i18n.ts';
 import { detectPage, hasNoTimeslotsMessage, hasTimeslotsData, parseBookingDetails, parseTimeslots, type PageKind } from './parse.ts';
 import type { SiteSession } from './session.ts';
 
@@ -62,7 +63,7 @@ export class BrowserSession implements SiteSession {
       }).catch(() => null);
       if (!href) await page.waitForTimeout(1000);
     }
-    if (!href) throw new SiteError('unknown_page', '首页上找不到 "Manage booking" 链接');
+    if (!href) throw new SiteError('unknown_page', msg('err.no_manage_link'));
     // 直接点这个链接会超时，取出地址再跳转
     await this.go(page, href);
     await this.assertNotBlocked(page);
@@ -72,7 +73,7 @@ export class BrowserSession implements SiteSession {
     try {
       await idBox.waitFor({ state: 'visible', timeout: 60_000 });
     } catch {
-      throw new SiteError('widgets_missing', '登录页的输入框没有出现（页面控件没有初始化）');
+      throw new SiteError('widgets_missing', msg('err.login_widgets'));
     }
     // 逐字输入，像真人一样；整体粘贴有时不触发控件的校验
     await idBox.click();
@@ -135,7 +136,7 @@ export class BrowserSession implements SiteSession {
     const id = `#rms_${weekdayKey(slot.date)}_${slotCellTime(slot.time)}`;
     const cell = page.locator(`${id} a`);
     if ((await cell.count()) === 0 || !(await cell.first().getAttribute('class'))?.includes('available')) {
-      throw new SiteError('unknown_page', `考位 ${slot.date} ${slot.time} 现在不可约`);
+      throw new SiteError('unknown_page', msg('err.slot_unavailable', { date: slot.date, time: slot.time }));
     }
     await cell.first().click();
     await page.waitForTimeout(800);
@@ -147,16 +148,16 @@ export class BrowserSession implements SiteSession {
 
   async finish(): Promise<'success' | 'failed' | 'unknown'> {
     if (!this.opts.allowFinish) {
-      throw new SiteError('unknown_page', '提交功能尚未启用：第一次真实改约验证之前，不会点击 Finish');
+      throw new SiteError('unknown_page', msg('err.finish_disabled'));
     }
-    if (!this.pending) throw new SiteError('unknown_page', '还没有选定考位，不能提交');
+    if (!this.pending) throw new SiteError('unknown_page', msg('err.no_pending'));
     // 真正的提交动作和完成页的识别，要等第一次真实改约时才能确认，见实现计划任务 10
-    throw new SiteError('unknown_page', '提交流程还没有验证过，暂不支持');
+    throw new SiteError('unknown_page', msg('err.finish_unsupported'));
   }
 
   async readCurrent(): Promise<BookingInfo> {
     const page = await this.page();
-    if (!(await this.tryReturnToMain(page))) throw new SiteError('unknown_page', '无法回到"查看预约"页');
+    if (!(await this.tryReturnToMain(page))) throw new SiteError('unknown_page', msg('err.no_main'));
     return this.readSummary(page);
   }
 
@@ -181,18 +182,18 @@ export class BrowserSession implements SiteSession {
       if (hasNoTimeslotsMessage(await page.innerText('body').catch(() => ''))) return null;
       await page.waitForTimeout(1000);
     }
-    throw new SiteError('unknown_page', '选时间页上既没有考位数据，也没有"没有考位"的提示');
+    throw new SiteError('unknown_page', msg('err.no_slots_data'));
   }
 
   /** 从"查看预约"页出发：选考点页 → 选时间页。期望日期设为 from，直接定位到那一周 */
   private async openChooseTime(page: Page, centreId: number, from: LocalDate): Promise<void> {
-    if (!(await this.tryReturnToMain(page))) throw new SiteError('unknown_page', '无法回到"查看预约"页');
+    if (!(await this.tryReturnToMain(page))) throw new SiteError('unknown_page', msg('err.no_main'));
     // "Change location" 是 Dojo 按钮不是链接，控件初始化后才会出现
     const changeBtn = page.locator('#changeLocationButton_label');
     try {
       await changeBtn.waitFor({ state: 'visible', timeout: 60_000 });
     } catch {
-      throw new SiteError('unknown_page', '"查看预约"页上找不到 Change location 按钮');
+      throw new SiteError('unknown_page', msg('err.no_change_location'));
     }
     await Promise.all([
       page.waitForLoadState('domcontentloaded', { timeout: NAV_TIMEOUT }).catch(() => {}),
@@ -214,7 +215,7 @@ export class BrowserSession implements SiteSession {
     await page.waitForTimeout(500);
     const stored = await page.locator('input[name=preferredDateStr]').inputValue();
     if (stored !== wanted) {
-      throw new SiteError('unknown_page', `期望日期没有生效：要设 ${wanted}，页面里是 "${stored}"`);
+      throw new SiteError('unknown_page', msg('err.date_not_set', { wanted, stored }));
     }
     await page.locator('#rms_batLocLocSel').check();
     await page.waitForTimeout(600);
@@ -227,17 +228,17 @@ export class BrowserSession implements SiteSession {
   /** 提交登录后没有进入"查看预约"页，判断是什么原因 */
   private async explainLoginFailure(page: Page): Promise<SiteError> {
     const kind = await this.currentKind(page);
-    if (kind === 'blocked') return new SiteError('blocked', '站点暂时拒绝访问');
-    if (kind === 'captcha') return new SiteError('captcha', '站点要求验证码');
+    if (kind === 'blocked') return new SiteError('blocked', msg('kind.blocked'));
+    if (kind === 'captcha') return new SiteError('captcha', msg('kind.captcha'));
     const text = await page.innerText('body').catch(() => '');
     // 控件没初始化时，提交只带了一个字段，站点提示必填项为空。这不是资料错误
     if (/Enter all mandatory fields/i.test(text)) {
-      return new SiteError('widgets_missing', '提交时提示必填项为空（控件没有初始化）');
+      return new SiteError('widgets_missing', msg('err.mandatory'));
     }
     if (/booking (number|details).*(not|incorrect|invalid)|no booking|not (been )?found|could not (find|locate)/i.test(text)) {
-      return new SiteError('bad_credentials', 'Booking number 或姓氏不正确');
+      return new SiteError('bad_credentials', msg('kind.bad_credentials'));
     }
-    return new SiteError('unknown_page', '提交登录后没有进入预约页，也不是已知的错误提示');
+    return new SiteError('unknown_page', msg('err.login_unknown'));
   }
 
   /** 翻到包含 date 的那一周（站点一次显示一周） */
@@ -249,7 +250,7 @@ export class BrowserSession implements SiteSession {
       await this.clickAndLoad(page, cur < want ? '#nextWeekButton' : '#prevWeekButton');
       await this.expectKind(page, 'choose_time');
     }
-    throw new SiteError('unknown_page', `翻不到 ${date} 所在的那一周`);
+    throw new SiteError('unknown_page', msg('err.week_not_found', { date }));
   }
 
   private async clickAndLoad(page: Page, selector: string): Promise<void> {
@@ -264,12 +265,12 @@ export class BrowserSession implements SiteSession {
   private async go(page: Page, url: string): Promise<void> {
     try {
       const res = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT });
-      if (res && res.status() === 403) throw new SiteError('blocked', '站点返回 403');
+      if (res && res.status() === 403) throw new SiteError('blocked', msg('err.http_403'));
     } catch (err) {
       if (err instanceof SiteError) throw err;
-      const msg = err instanceof Error ? err.message : String(err);
-      if (/ERR_CONNECTION_RESET|ERR_CONNECTION_CLOSED|ERR_EMPTY_RESPONSE/.test(msg)) throw new SiteError('blocked', `连接被站点断开：${msg.split('\n')[0]}`);
-      throw new SiteError('timeout', `打开页面失败：${msg.split('\n')[0]}`);
+      const text = err instanceof Error ? err.message : String(err);
+      if (/ERR_CONNECTION_RESET|ERR_CONNECTION_CLOSED|ERR_EMPTY_RESPONSE/.test(text)) throw new SiteError('blocked', msg('err.conn_reset', { detail: text.split('\n')[0]! }));
+      throw new SiteError('timeout', msg('err.open_failed', { detail: text.split('\n')[0]! }));
     }
   }
 
@@ -281,22 +282,22 @@ export class BrowserSession implements SiteSession {
   private async expectKind(page: Page, want: PageKind): Promise<void> {
     const kind = await this.currentKind(page);
     if (kind === want) return;
-    if (kind === 'blocked') throw new SiteError('blocked', '站点暂时拒绝访问');
-    if (kind === 'captcha') throw new SiteError('captcha', '站点要求验证码');
-    throw new SiteError('unknown_page', `期望页面 ${want}，实际是 ${kind}`);
+    if (kind === 'blocked') throw new SiteError('blocked', msg('kind.blocked'));
+    if (kind === 'captcha') throw new SiteError('captcha', msg('kind.captcha'));
+    throw new SiteError('unknown_page', msg('err.unexpected_page', { want, got: kind }));
   }
 
   private async assertNotBlocked(page: Page): Promise<void> {
     const kind = await this.currentKind(page);
-    if (kind === 'blocked') throw new SiteError('blocked', '站点暂时拒绝访问');
-    if (kind === 'captcha') throw new SiteError('captcha', '站点要求验证码');
+    if (kind === 'blocked') throw new SiteError('blocked', msg('kind.blocked'));
+    if (kind === 'captcha') throw new SiteError('captcha', msg('kind.captcha'));
   }
 
   private async readSummary(page: Page): Promise<BookingInfo> {
     try {
       return parseBookingDetails(await page.innerText('body'));
     } catch (err) {
-      throw new SiteError('unknown_page', `读不出当前预约：${err instanceof Error ? err.message : String(err)}`);
+      throw new SiteError('unknown_page', msg('err.read_summary', { detail: errorText(err) }));
     }
   }
 

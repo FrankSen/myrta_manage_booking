@@ -11,6 +11,7 @@ import type { BookingInfo } from '../domain/types.ts';
 import type { Repo, Student } from '../storage/repo.ts';
 import type { LicenseState } from '../license/license.ts';
 import { INTERVAL_CHOICES_MIN, INTERVAL_HELP } from '../config/interval.ts';
+import { errorText, isLang, msg, type Lang, type Text } from '../i18n.ts';
 import { DEFAULT_TOLERANCE, refreshDeadline } from '../domain/matcher.ts';
 import { MAX_CENTRES, ValidationError, parseInterval, parseNewStudent, parseTarget } from './validate.ts';
 
@@ -28,6 +29,8 @@ export interface UiDeps {
   now(): number;
   /** 授权。没有时不检查（测试用） */
   license?: { state(): LicenseState; import(text: string): LicenseState };
+  /** 当前界面语言和保存方法。没有时固定中文、不保存 */
+  language?: { get(): Lang; set(lang: Lang): void };
   /** 用系统默认浏览器打开 myrta.com，让教练手动改约。测试时替换 */
   openSite?: () => void;
 }
@@ -77,17 +80,12 @@ export function publicStudent(s: Student, service?: Pick<Service, 'progress' | '
   };
 }
 
-const LICENSE_TEXT: Record<Exclude<LicenseState, { ok: true }>['reason'], string> = {
-  missing: '还没有导入授权文件，请联系开发者获取',
-  invalid: '授权文件无效（可能被修改过），请联系开发者重新获取',
-  expired: '试用已到期，请联系开发者续期',
-  clock_back: '电脑时间比上次使用时早，请把电脑时间改回正确的时间',
-};
+const licenseText = (reason: Exclude<LicenseState, { ok: true }>['reason']) => msg(`license.${reason}`);
 
 function publicLicense(s: LicenseState) {
   return s.ok
     ? { ok: true, name: s.name, until: s.until }
-    : { ok: false, reason: s.reason, message: LICENSE_TEXT[s.reason], name: s.name ?? null, until: s.until ?? null };
+    : { ok: false, reason: s.reason, message: licenseText(s.reason), name: s.name ?? null, until: s.until ?? null };
 }
 
 function tokenOk(given: string | null | undefined, token: string): boolean {
@@ -107,14 +105,14 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
   let size = 0;
   for await (const c of req) {
     size += (c as Buffer).length;
-    if (size > 64 * 1024) throw new ValidationError('请求太大');
+    if (size > 64 * 1024) throw new ValidationError(msg('api.too_big'));
     chunks.push(c as Buffer);
   }
   if (chunks.length === 0) return {};
   try {
     return JSON.parse(Buffer.concat(chunks).toString('utf8'));
   } catch {
-    throw new ValidationError('请求内容不是有效的 JSON');
+    throw new ValidationError(msg('api.bad_json'));
   }
 }
 
@@ -145,20 +143,20 @@ export async function startUiServer(deps: UiDeps, opts: { port?: number; token?:
     }
     if (method === 'GET' && !url.pathname.startsWith('/api/')) {
       const name = url.pathname === '/' ? 'index.html' : url.pathname.slice(1);
-      if (!/^[\w.-]+$/.test(name)) return send(res, 404, { error: '没有这个页面' });
+      if (!/^[\w.-]+$/.test(name)) return send(res, 404, { error: msg('api.not_found_page') });
       try {
         const body = readFileSync(new URL(name, PUBLIC_DIR));
         const ext = name.slice(name.lastIndexOf('.'));
         res.writeHead(200, { 'Content-Type': MIME[ext] ?? 'application/octet-stream', 'Cache-Control': 'no-store' });
         res.end(body);
       } catch {
-        send(res, 404, { error: '没有这个页面' });
+        send(res, 404, { error: msg('api.not_found_page') });
       }
       return;
     }
 
     const given = req.headers['x-token'] as string | undefined ?? url.searchParams.get('t');
-    if (!tokenOk(given, token)) return send(res, 401, { error: '未授权' });
+    if (!tokenOk(given, token)) return send(res, 401, { error: msg('api.unauthorized') });
 
     const path = url.pathname;
     let m: RegExpExecArray | null;
@@ -167,16 +165,16 @@ export async function startUiServer(deps: UiDeps, opts: { port?: number; token?:
     if (method === 'GET' && path === '/api/license') return send(res, 200, publicLicense(licenseState()));
     if (method === 'POST' && path === '/api/license') {
       const body = (await readJson(req)) as { text?: unknown };
-      if (!deps.license) return send(res, 400, { error: '这个版本不需要授权' });
-      if (typeof body.text !== 'string') throw new ValidationError('请选择授权文件');
+      if (!deps.license) return send(res, 400, { error: msg('api.no_license_needed') });
+      if (typeof body.text !== 'string') throw new ValidationError(msg('api.choose_license'));
       const s = deps.license.import(body.text);
-      return send(res, s.ok ? 200 : 400, s.ok ? publicLicense(s) : { error: LICENSE_TEXT[s.reason], license: publicLicense(s) });
+      return send(res, s.ok ? 200 : 400, s.ok ? publicLicense(s) : { error: licenseText(s.reason), license: publicLicense(s) });
     }
     // 会访问站点的操作，授权无效时一律拒绝；查看类接口照常可用
     const needsLicense = method !== 'GET' && (/^\/api\/students(\/\d+\/start)?$/.test(path) && method === 'POST' || /^\/api\/offers\/\d+\/accept$/.test(path));
     if (needsLicense) {
       const s = licenseState();
-      if (!s.ok) return send(res, 403, { error: LICENSE_TEXT[s.reason], license: publicLicense(s) });
+      if (!s.ok) return send(res, 403, { error: licenseText(s.reason), license: publicLicense(s) });
     }
 
     if (method === 'GET' && path === '/api/state') {
@@ -189,6 +187,7 @@ export async function startUiServer(deps: UiDeps, opts: { port?: number; token?:
         intervalChoicesMin: INTERVAL_CHOICES_MIN,
         maxCentres: MAX_CENTRES,
         intervalHelp: INTERVAL_HELP,
+        language: deps.language?.get() ?? 'zh',
         now: deps.now(),
       });
     }
@@ -201,7 +200,7 @@ export async function startUiServer(deps: UiDeps, opts: { port?: number; token?:
       try {
         current = await deps.fetchCurrent(input.bookingId, input.surname);
       } catch (err) {
-        return send(res, 422, { error: `无法读取这个预约：${err instanceof Error ? err.message : String(err)}` });
+        return send(res, 422, { error: msg('api.read_booking', { detail: errorText(err) }) });
       }
       const centre = deps.centreList.find((c) => c.name.toLowerCase() === current.centreName.toLowerCase());
       const id = deps.repo.addStudent({
@@ -214,17 +213,17 @@ export async function startUiServer(deps: UiDeps, opts: { port?: number; token?:
     }
     if ((m = /^\/api\/students\/(\d+)\/target$/.exec(path)) && method === 'PUT') {
       const id = Number(m[1]);
-      if (!deps.repo.getStudent(id)) return send(res, 404, { error: '没有这个学员' });
+      if (!deps.repo.getStudent(id)) return send(res, 404, { error: msg('api.no_student') });
       deps.repo.updateTarget(id, parseTarget(await readJson(req), known));
       return send(res, 200, publicStudent(deps.repo.getStudent(id)!, deps.service, deps.maxDateDays));
     }
     if ((m = /^\/api\/students\/(\d+)\/(start|pause)$/.exec(path)) && method === 'POST') {
       const id = Number(m[1]);
       const s = deps.repo.getStudent(id);
-      if (!s) return send(res, 404, { error: '没有这个学员' });
+      if (!s) return send(res, 404, { error: msg('api.no_student') });
       if (m[2] === 'start') {
-        if (s.target.centreIds.length === 0) return send(res, 400, { error: '请先设置目标考点' });
-        if (!deps.service.startStudent(id)) return send(res, 409, { error: '无法开始：已达到同时刷新的学员上限，或该学员已完成' });
+        if (s.target.centreIds.length === 0) return send(res, 400, { error: msg('api.need_centre') });
+        if (!deps.service.startStudent(id)) return send(res, 409, { error: msg('api.cant_start') });
       } else {
         deps.service.pauseStudent(id);
       }
@@ -232,7 +231,7 @@ export async function startUiServer(deps: UiDeps, opts: { port?: number; token?:
     }
     if ((m = /^\/api\/students\/(\d+)$/.exec(path)) && method === 'DELETE') {
       const id = Number(m[1]);
-      if (!deps.repo.getStudent(id)) return send(res, 404, { error: '没有这个学员' });
+      if (!deps.repo.getStudent(id)) return send(res, 404, { error: msg('api.no_student') });
       deps.service.pauseStudent(id);
       deps.repo.deleteStudent(id);
       return send(res, 200, { ok: true });
@@ -242,7 +241,7 @@ export async function startUiServer(deps: UiDeps, opts: { port?: number; token?:
     }
     if ((m = /^\/api\/offers\/(\d+)\/(accept|dismiss)$/.exec(path)) && method === 'POST') {
       const id = Number(m[1]);
-      if (!deps.repo.getOffer(id)) return send(res, 404, { error: '没有这个待确认考位' });
+      if (!deps.repo.getOffer(id)) return send(res, 404, { error: msg('api.no_offer') });
       if (m[2] === 'dismiss') {
         deps.service.dismissOffer(id);
         return send(res, 200, { ok: true });
@@ -256,9 +255,15 @@ export async function startUiServer(deps: UiDeps, opts: { port?: number; token?:
     }
     if ((m = /^\/api\/students\/(\d+)\/interval$/.exec(path)) && method === 'PUT') {
       const id = Number(m[1]);
-      if (!deps.repo.getStudent(id)) return send(res, 404, { error: '没有这个学员' });
+      if (!deps.repo.getStudent(id)) return send(res, 404, { error: msg('api.no_student') });
       deps.service.setStudentInterval(id, parseInterval(await readJson(req), true));
       return send(res, 200, publicStudent(deps.repo.getStudent(id)!, deps.service, deps.maxDateDays));
+    }
+    if (method === 'PUT' && path === '/api/settings/language') {
+      const lang = ((await readJson(req)) as { language?: unknown }).language;
+      if (!isLang(lang)) throw new ValidationError(msg('api.bad_lang'));
+      deps.language?.set(lang);
+      return send(res, 200, { language: lang });
     }
     if (method === 'POST' && path === '/api/open-site') {
       (deps.openSite ?? defaultOpenSite)();
@@ -274,14 +279,14 @@ export async function startUiServer(deps: UiDeps, opts: { port?: number; token?:
       req.on('close', () => clients.delete(res));
       return;
     }
-    send(res, 404, { error: '没有这个接口' });
+    send(res, 404, { error: msg('api.no_api') });
   };
 
   const server: Server = createServer((req, res) => {
     handle(req, res).catch((err) => {
       if (res.headersSent) return res.end();
-      if (err instanceof ValidationError) return send(res, 400, { error: err.message });
-      send(res, 500, { error: '程序内部出错' });
+      if (err instanceof ValidationError) return send(res, 400, { error: err.text });
+      send(res, 500, { error: msg('api.internal') });
     });
   });
   await new Promise<void>((resolve, reject) => {

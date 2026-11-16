@@ -1,4 +1,6 @@
-// 目标时间的选项和联动规则。浏览器和测试共用，不依赖页面
+// 目标时间的选项和联动规则。浏览器和测试共用，不依赖页面。lang 默认中文
+import { t } from './i18n.js';
+
 /** 可选时间：06:00 到 18:00，每 15 分钟一档 */
 export const FIRST = 6 * 60;
 export const LAST = 18 * 60;
@@ -20,13 +22,13 @@ export function onToChange(range) {
 }
 
 /** 保存前检查，返回错误文字；没问题返回空字符串 */
-export function checkTime(mode, range, times) {
-  if (mode === 'times') return times.length === 0 ? '请至少选一个指定时间' : '';
-  return range.from > range.to ? '最晚时间不能早于最早时间' : '';
+export function checkTime(mode, range, times, lang = 'zh') {
+  if (mode === 'times') return times.length === 0 ? t(lang, 'time.need_times') : '';
+  return range.from > range.to ? t(lang, 'time.bad_range') : '';
 }
 
 /** 卡片上显示的时间说明 */
-export function describeTime(target) {
-  if (target.times && target.times.length > 0) return `指定 ${target.times.join('、')}`;
+export function describeTime(target, lang = 'zh') {
+  if (target.times && target.times.length > 0) return t(lang, 'time.specific', { list: target.times });
   return target.timeFrom === target.timeTo ? `${target.timeFrom}` : `${target.timeFrom}–${target.timeTo}`;
 }

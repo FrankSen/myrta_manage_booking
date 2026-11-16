@@ -1,5 +1,17 @@
-import { checkTime, describeTime, onFromChange, onToChange, quarterTimes } from './time-options.js';
-import { countdown, cycleLabel, estimate, minutesLabel, remaining } from './format.js';
+import { checkTime, describeTime as describeTime0, onFromChange, onToChange, quarterTimes } from './time-options.js';
+import { countdown, cycleLabel as cycleLabel0, estimate as estimate0, minutesLabel as minutesLabel0, remaining as remaining0 } from './format.js';
+import { DEFAULT_LANG, fmtDate as fmtDate0, fmtStamp as fmtStamp0, render, t } from './i18n.js';
+
+// 当前界面语言。所有显示文字都经过 tr / txt，切换语言后整页重新渲染
+let lang = DEFAULT_LANG;
+const tr = (key, args) => t(lang, key, args);
+/** 服务端返回的文字：可能是普通字符串，也可能是待翻译的消息 */
+const txt = (x) => render(lang, x);
+const describeTime = (target) => describeTime0(target, lang);
+const cycleLabel = (ms) => cycleLabel0(ms, lang);
+const estimate = (m) => estimate0(m, lang);
+const minutesLabel = (ms) => minutesLabel0(ms, lang);
+const remaining = (ms) => remaining0(ms, lang);
 
 const token = new URLSearchParams(location.search).get('t') || '';
 const $ = (s) => document.querySelector(s);
@@ -18,20 +30,17 @@ async function api(method, path, body) {
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `出错了（${res.status}）`);
+  if (!res.ok) throw new Error(data.error ? txt(data.error) : tr('err.http', { status: res.status }));
   return data;
 }
 
-const STATUS_TEXT = { idle: '未开始', running: '刷新中', pending_confirm: '已找到（未提交）', done: '已改约', stopped: '已停止', paused: '已暂停' };
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
-const WEEK = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
-const fmtDate = (d) => {
-  if (!d) return '';
-  const [y, m, day] = d.split('-').map(Number);
-  return `${y}年${m}月${day}日 ${WEEK[new Date(Date.UTC(y, m - 1, day)).getUTCDay()]}`;
-};
-const fmtStamp = (ms) => new Date(ms).toLocaleString('zh-CN', { hour12: false, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
-const centreName = (id) => centreById.get(id)?.name || `考点 ${id}`;
+const fmtDate = (d) => fmtDate0(lang, d);
+// 一律按悉尼时间显示，不跟电脑时区走
+const fmtStamp = (ms) => fmtStamp0(lang, ms);
+const centreName = (id) => centreById.get(id)?.name || tr('centre.unknown', { id });
+const statusText = (st) => tr(`st.${st}`);
+const isManualPause = (note) => note && typeof note === 'object' && note.k === 'status.manual_pause' || note === '教练手动暂停';
 
 // ---------- 渲染 ----------
 
@@ -39,10 +48,10 @@ function renderStats(list, offers) {
   const n = (st) => list.filter((s) => s.status === st).length;
   const todo = offers.length + n('pending_confirm') + n('paused');
   $('#stats').innerHTML = [
-    ['go', n('running'), '刷新中'],
-    ['wait', todo, '需要你处理'],
-    ['info', n('done'), '已改约'],
-    ['', list.length, '学员总数'],
+    ['go', n('running'), tr('stats.running')],
+    ['wait', todo, tr('stats.todo')],
+    ['info', n('done'), tr('stats.done')],
+    ['', list.length, tr('stats.total')],
   ].map(([c, v, t]) => `<div class="stat"><span class="light ${c}" ${c ? '' : 'style="background:var(--idle)"'}></span><div><b>${v}</b><br><span>${t}</span></div></div>`).join('');
 }
 
@@ -51,23 +60,23 @@ function renderTodo(list, offers) {
   const items = [];
   for (const o of offers) {
     items.push(`<div class="todo-item" data-offer="${o.id}">
-      <div><span class="tag near">接近</span><span class="what">${esc(byId.get(o.studentId)?.label ?? '学员')}：${esc(centreName(o.centreId))} ${esc(fmtDate(o.date))} ${esc(o.time)}</span>
-        <div class="hint">${o.notes.map(esc).join('；')}</div></div>
-      <div class="actions"><button class="primary" data-act="accept">改到这个时间</button><button data-act="dismiss">忽略</button></div>
+      <div><span class="tag near">${tr('tag.near')}</span><span class="what">${esc(byId.get(o.studentId)?.label ?? tr('todo.student'))}${tr('run.phase_sep')}${esc(centreName(o.centreId))} ${esc(fmtDate(o.date))} ${esc(o.time)}</span>
+        <div class="hint">${o.notes.map((x) => esc(txt(x))).join(tr('list.notes_sep'))}</div></div>
+      <div class="actions"><button class="primary" data-act="accept">${tr('btn.accept')}</button><button data-act="dismiss">${tr('btn.dismiss')}</button></div>
     </div>`);
   }
   for (const s of list.filter((x) => x.status === 'pending_confirm')) {
     items.push(`<div class="todo-item" data-id="${s.id}">
-      <div><span class="tag found">已找到</span><span class="what">${esc(s.label)}</span>
-        <div class="hint">${esc(s.statusNote)}。请到网站手动改约，改好后在这里删除或重新设置目标。</div></div>
-      <div class="actions"><button class="warn" data-act="open-site">打开 myrta.com</button><button data-act="start">继续找</button></div>
+      <div><span class="tag found">${tr('tag.found')}</span><span class="what">${esc(s.label)}</span>
+        <div class="hint">${esc(tr('todo.found_hint', { note: txt(s.statusNote) }))}</div></div>
+      <div class="actions"><button class="warn" data-act="open-site">${tr('btn.open_site')}</button><button data-act="start">${tr('btn.continue')}</button></div>
     </div>`);
   }
-  for (const s of list.filter((x) => x.status === 'paused' && x.statusNote && x.statusNote !== '教练手动暂停')) {
+  for (const s of list.filter((x) => x.status === 'paused' && x.statusNote && !isManualPause(x.statusNote))) {
     items.push(`<div class="todo-item" data-id="${s.id}">
-      <div><span class="tag" style="background:#fbe0dd;color:#a8261c">出错暂停</span><span class="what">${esc(s.label)}</span>
-        <div class="hint">${esc(s.statusNote)}</div></div>
-      <div class="actions"><button class="primary" data-act="start">重新开始</button></div>
+      <div><span class="tag" style="background:#fbe0dd;color:#a8261c">${tr('tag.error')}</span><span class="what">${esc(s.label)}</span>
+        <div class="hint">${esc(txt(s.statusNote))}</div></div>
+      <div class="actions"><button class="primary" data-act="start">${tr('btn.restart')}</button></div>
     </div>`);
   }
   $('#todo-box').hidden = items.length === 0;
@@ -76,12 +85,12 @@ function renderTodo(list, offers) {
 
 function studentActions(s) {
   const b = [];
-  if (s.status === 'running') b.push('<button data-act="pause">暂停</button>');
-  else if (s.status !== 'done') b.push(`<button class="primary" data-act="start">${s.status === 'idle' ? '开始刷新' : '继续刷新'}</button>`);
-  if (s.status === 'pending_confirm') b.push('<button class="warn" data-act="open-site">打开 myrta.com</button>');
-  b.push('<button data-act="target">设置目标</button>');
-  if (s.status !== 'done') b.push('<button data-act="interval">刷新间隔</button>');
-  b.push('<button class="danger" data-act="delete">删除</button>');
+  if (s.status === 'running') b.push(`<button data-act="pause">${tr('btn.pause')}</button>`);
+  else if (s.status !== 'done') b.push(`<button class="primary" data-act="start">${tr(s.status === 'idle' ? 'btn.start' : 'btn.resume')}</button>`);
+  if (s.status === 'pending_confirm') b.push(`<button class="warn" data-act="open-site">${tr('btn.open_site')}</button>`);
+  b.push(`<button data-act="target">${tr('btn.target')}</button>`);
+  if (s.status !== 'done') b.push(`<button data-act="interval">${tr('btn.interval')}</button>`);
+  b.push(`<button class="danger" data-act="delete">${tr('btn.delete')}</button>`);
   return b.join('');
 }
 
@@ -90,30 +99,31 @@ function runLine(s) {
   const parts = [];
   const left = s.deadline ? s.deadline.at - serverNow() : 0;
   const leftText = remaining(left);
-  const interval = `<span>间隔 <b>${minutesLabel(s.effectiveIntervalMs)}</b>${s.intervalMs ? '（单独设置）' : ''}</span>`
-    + (s.expectedCycleMs ? `<span title="包括一轮本身的耗时，以及和其他学员排队的时间">预计每 <b>${cycleLabel(s.expectedCycleMs)}</b> 刷新一次</span>` : '');
+  const b = (x) => `<b>${esc(x)}</b>`;
+  const interval = `<span>${tr('run.interval', { min: b(minutesLabel(s.effectiveIntervalMs)), own: s.intervalMs ? tr('run.own') : '' })}</span>`
+    + (s.expectedCycleMs ? `<span title="${esc(tr('run.cycle_title'))}">${tr('run.cycle', { min: b(cycleLabel(s.expectedCycleMs)) })}</span>` : '');
   if (s.status === 'running') {
-    parts.push(`<span>已查 <b>${s.rounds}</b> 轮</span>`);
+    parts.push(`<span>${tr('run.rounds', { n: b(s.rounds) })}</span>`);
     const p = s.progress;
     if (p && p.running) {
-      parts.push(`<span class="now">● 第 ${s.rounds + 1} 轮进行中${p.phase ? `：${esc(p.phase)}` : ''}</span>`);
+      parts.push(`<span class="now">${tr('run.in_progress', { n: s.rounds + 1, phase: p.phase ? tr('run.phase_sep') + esc(txt(p.phase)) : '' })}</span>`);
       parts.push('<span class="meter busy"><span></span></span>');
     } else if (p && p.nextAt) {
       const total = s.effectiveIntervalMs * 1.2;
       const rest = p.nextAt - serverNow();
       const pct = Math.min(100, Math.max(0, 100 - (rest / total) * 100));
-      parts.push(`<span>下一轮 <b data-next="${p.nextAt}">${countdown(rest)}</b> 后</span>`);
+      parts.push(`<span>${tr('run.next', { t: `<b data-next="${p.nextAt}">${countdown(rest)}</b>` })}</span>`);
       parts.push(`<span class="meter"><span data-meter="${p.nextAt}" data-total="${total}" style="width:${pct}%"></span></span>`);
     }
     parts.push(interval);
-    if (leftText) parts.push(`<span>还可刷新 <b>${leftText}</b></span>`);
+    if (leftText) parts.push(`<span>${tr('run.left', { t: b(leftText) })}</span>`);
   } else if (s.status !== 'done') {
-    if (s.rounds > 0) parts.push(`<span>上次共查 <b>${s.rounds}</b> 轮</span>`);
+    if (s.rounds > 0) parts.push(`<span>${tr('run.last_rounds', { n: b(s.rounds) })}</span>`);
     parts.push(interval);
-    if (leftText) parts.push(`<span>还可刷新 <b>${leftText}</b></span>`);
-    else parts.push('<span class="warnline">目标日期已进入 48 小时内，无法再刷新</span>');
+    if (leftText) parts.push(`<span>${tr('run.left', { t: b(leftText) })}</span>`);
+    else parts.push(`<span class="warnline">${tr('run.locked')}</span>`);
   } else if (s.rounds > 0) {
-    parts.push(`<span>共查 <b>${s.rounds}</b> 轮后改约成功</span>`);
+    parts.push(`<span>${tr('run.done_rounds', { n: b(s.rounds) })}</span>`);
   }
   return parts.length ? `<div class="run">${parts.join('')}</div>` : '';
 }
@@ -132,23 +142,23 @@ function tick() {
 function renderStudents(list) {
   const box = $('#students');
   if (list.length === 0) {
-    box.innerHTML = '<div class="empty"><img src="/logo.svg" class="logo" alt=""><p>还没有学员。点右上角"添加学员"，输入 Booking number 和姓氏即可。</p></div>';
+    box.innerHTML = `<div class="empty"><img src="/logo.svg" class="logo" alt=""><p>${esc(tr('students.empty'))}</p></div>`;
     return;
   }
   box.innerHTML = list.map((s) => {
     const t = s.target;
-    const names = t.centreIds.map(centreName).join('、') || '（未设置考点）';
-    const dates = t.dateFrom === t.dateTo ? fmtDate(t.dateFrom) : `${fmtDate(t.dateFrom)} 至 ${fmtDate(t.dateTo)}`;
+    const names = t.centreIds.map(centreName).join(tr('list.sep')) || tr('card.no_centre');
+    const dates = t.dateFrom === t.dateTo ? fmtDate(t.dateFrom) : tr('card.dates_range', { from: fmtDate(t.dateFrom), to: fmtDate(t.dateTo) });
     return `<div class="card ${s.status}" data-id="${s.id}">
       <div class="head"><span class="name">${esc(s.label)}</span><span class="meta">Booking …${esc(s.bookingIdTail)}</span>
-        <span class="status ${s.status}">${STATUS_TEXT[s.status] || s.status}</span></div>
+        <span class="status ${s.status}">${esc(statusText(s.status))}</span></div>
       <div class="compare">
-        <div class="box cur"><div class="k">📄 现有预约</div><div class="v">${esc(s.current.centreName)}</div><div class="s">${esc(fmtDate(s.current.date))} ${esc(s.current.time)}</div></div>
+        <div class="box cur"><div class="k">${tr('card.current')}</div><div class="v">${esc(s.current.centreName)}</div><div class="s">${esc(fmtDate(s.current.date))} ${esc(s.current.time)}</div></div>
         <div class="arrow">→</div>
-        <div class="box goal"><div class="k">🎯 目标</div><div class="v">${esc(names)}</div><div class="s">${esc(dates)}　${esc(describeTime(t))}</div></div>
+        <div class="box goal"><div class="k">${tr('card.goal')}</div><div class="v">${esc(names)}</div><div class="s">${esc(dates)}　${esc(describeTime(t))}</div></div>
       </div>
       ${runLine(s)}
-      ${s.statusNote ? `<div class="note">${esc(s.statusNote)}</div>` : ''}
+      ${s.statusNote ? `<div class="note">${esc(txt(s.statusNote))}</div>` : ''}
       <div class="actions">${studentActions(s)}</div></div>`;
   }).join('');
 }
@@ -160,14 +170,14 @@ function renderLogs() {
   const problems = $('#log-problems').checked;
   const byId = new Map(students.map((s) => [s.id, s.label]));
   const shown = logs.filter((l) => (!who || String(l.studentId) === who) && (!problems || l.level !== 'info'));
-  $('#logs').innerHTML = shown.map((l) => `<div class="${esc(l.level)}">${esc(fmtStamp(l.at))}　${l.studentId ? `<span class="who">${esc(byId.get(l.studentId) ?? '')}</span>　` : ''}${esc(l.msg)}</div>`).join('') || '<span class="hint">暂无记录</span>';
+  $('#logs').innerHTML = shown.map((l) => `<div class="${esc(l.level)}">${esc(fmtStamp(l.at))}　${l.studentId ? `<span class="who">${esc(byId.get(l.studentId) ?? '')}</span>　` : ''}${esc(txt(l.msg))}</div>`).join('') || `<span class="hint">${tr('logs.empty')}</span>`;
   $('#logs').classList.toggle('collapsed', logsCollapsed);
-  $('#log-toggle').textContent = logsCollapsed ? '展开' : '收起';
+  $('#log-toggle').textContent = tr(logsCollapsed ? 'logs.expand' : 'logs.collapse');
 }
 function renderLogFilter() {
   const sel = $('#log-student');
   const cur = sel.value;
-  sel.innerHTML = '<option value="">全部学员</option>' + students.map((s) => `<option value="${s.id}">${esc(s.label)}</option>`).join('');
+  sel.innerHTML = `<option value="">${esc(tr('logs.all'))}</option>` + students.map((s) => `<option value="${s.id}">${esc(s.label)}</option>`).join('');
   sel.value = students.some((s) => String(s.id) === cur) ? cur : '';
 }
 $('#log-student').onchange = renderLogs;
@@ -188,14 +198,6 @@ async function reload() {
 
 // ---------- 按钮 ----------
 
-const ACCEPT_TEXT = {
-  success: '改约成功',
-  dry_run: '已走到确认页。自动改约还没有开启，所以没有提交，请到网站手动改约',
-  gone: '这个考位已经没有了',
-  failed: '提交时被别人抢先了',
-  not_open: '这个考位已处理过',
-  error: '出错了，请看运行记录',
-};
 
 document.addEventListener('click', async (ev) => {
   const btn = ev.target.closest('button[data-act]');
@@ -209,16 +211,16 @@ document.addEventListener('click', async (ev) => {
       const id = holder.dataset.offer;
       if (act === 'dismiss') await api('POST', `/api/offers/${id}/dismiss`);
       else {
-        btn.disabled = true; btn.textContent = '正在处理，约 1 分钟…';
+        btn.disabled = true; btn.textContent = tr('accept.working');
         const { result } = await api('POST', `/api/offers/${id}/accept`);
-        alert(ACCEPT_TEXT[result] || result);
+        alert(tr(`accept.${result}`));
       }
     } else {
       const id = holder.dataset.id;
       const s = students.find((x) => String(x.id) === id);
       if (act === 'start') await api('POST', `/api/students/${id}/start`);
       if (act === 'pause') await api('POST', `/api/students/${id}/pause`);
-      if (act === 'delete' && confirm(`确定删除学员"${s?.label}"吗？删除后不再刷新，记录也一并删除。`)) await api('DELETE', `/api/students/${id}`);
+      if (act === 'delete' && confirm(tr('confirm.delete', { label: s?.label ?? '' }))) await api('DELETE', `/api/students/${id}`);
       if (act === 'target') return openTarget(s);
       if (act === 'interval') return openInterval(s);
     }
@@ -234,7 +236,7 @@ $('#form-add').addEventListener('submit', async (ev) => {
   ev.preventDefault();
   const f = new FormData(ev.target);
   const submit = $('#add-submit');
-  submit.disabled = true; $('#add-cancel').disabled = true; submit.textContent = '正在读取…';
+  submit.disabled = true; $('#add-cancel').disabled = true; submit.textContent = tr('add.reading');
   $('#add-progress').hidden = false; $('#add-error').textContent = '';
   try {
     const s = await api('POST', '/api/students', { label: f.get('label'), bookingId: f.get('bookingId'), surname: f.get('surname') });
@@ -242,7 +244,7 @@ $('#form-add').addEventListener('submit', async (ev) => {
     await reload();
     openTarget(s, true);
   } catch (e) { $('#add-error').textContent = e.message; }
-  finally { submit.disabled = false; $('#add-cancel').disabled = false; submit.textContent = '添加并读取预约'; $('#add-progress').hidden = true; }
+  finally { submit.disabled = false; $('#add-cancel').disabled = false; submit.textContent = tr('add.submit'); $('#add-progress').hidden = true; }
 });
 // 读取中不能用 Esc 关掉对话框，否则看不到结果
 $('#dlg-add').addEventListener('cancel', (ev) => { if ($('#add-submit').disabled) ev.preventDefault(); });
@@ -259,16 +261,16 @@ function renderCentres() {
   const q = $('#centre-search').value.trim().toLowerCase();
   const list = state.centres.filter((c) => !q || c.name.toLowerCase().includes(q) || (c.suburb || '').toLowerCase().includes(q) || (c.postcode || '').startsWith(q));
   $('#centre-list').innerHTML = list.map((c) => `<label><input type="checkbox" value="${c.id}" ${chosen.has(c.id) ? 'checked' : ''}> ${esc(c.name)}<span class="suburb">${esc(c.suburb || '')} ${esc(c.postcode || '')}</span></label>`).join('')
-    || '<p class="hint" style="padding:6px 10px">没有找到</p>';
-  $('#centre-chosen').innerHTML = [...chosen].map((id) => `<span class="chip">${esc(centreName(id))}<button type="button" data-remove="${id}" title="去掉">×</button></span>`).join('');
-  $('#centre-count').textContent = `已选 ${chosen.size} / ${state.maxCentres} 个`;
+    || `<p class="hint" style="padding:6px 10px">${tr('target.not_found')}</p>`;
+  $('#centre-chosen').innerHTML = [...chosen].map((id) => `<span class="chip">${esc(centreName(id))}<button type="button" data-remove="${id}" title="${esc(tr('target.remove'))}">×</button></span>`).join('');
+  $('#centre-count').textContent = tr('target.count', { n: chosen.size, max: state.maxCentres });
 }
 $('#centre-search').oninput = renderCentres;
 $('#centre-list').onchange = (ev) => {
   const id = Number(ev.target.value);
   if (ev.target.checked && chosen.size >= state.maxCentres) {
     ev.target.checked = false;
-    $('#target-error').textContent = `每个学员最多选 ${state.maxCentres} 个考点。考点越多一轮越慢，会拖慢所有学员`;
+    $('#target-error').textContent = tr('target.max_centres', { max: state.maxCentres });
     return;
   }
   $('#target-error').textContent = '';
@@ -294,7 +296,7 @@ $('#time-to').onchange = (ev) => { range = onToChange({ ...range, to: ev.target.
 
 function renderTimeGrid() {
   const hours = [...new Set(TIMES.map((t) => t.slice(0, 2)))];
-  $('#time-grid').innerHTML = hours.map((h) => `<div class="hour-row"><span class="h">${h}点</span>${
+  $('#time-grid').innerHTML = hours.map((h) => `<div class="hour-row"><span class="h">${tr('target.hour', { h })}</span>${
     TIMES.filter((t) => t.startsWith(h)).map((t) => `<button type="button" data-time="${t}" class="${pickedTimes.has(t) ? 'on' : ''}">${t}</button>`).join('')
   }</div>`).join('');
 }
@@ -323,8 +325,8 @@ function openTarget(s, fresh = false) {
   if (!s) return;
   editingId = s.id;
   const t = s.target;
-  $('#target-title').textContent = `设置目标：${s.label}`;
-  $('#target-current').textContent = `${fresh ? '已读取到现有预约：' : '现有预约：'}${s.current.centreName}，${fmtDate(s.current.date)} ${s.current.time}`;
+  $('#target-title').textContent = tr('target.title', { label: s.label });
+  $('#target-current').textContent = tr(fresh ? 'target.current_fresh' : 'target.current', { centre: s.current.centreName, date: fmtDate(s.current.date), time: s.current.time });
   chosen = new Set(t.centreIds);
   $('#centre-search').value = '';
   renderCentres();
@@ -352,8 +354,8 @@ $('#form-target').addEventListener('submit', async (ev) => {
   const f = ev.target.elements;
   const mode = timeMode();
   const times = [...pickedTimes].sort();
-  if (chosen.size === 0) { $('#target-error').textContent = '请至少选一个考点'; return; }
-  const err = checkTime(mode, range, times);
+  if (chosen.size === 0) { $('#target-error').textContent = tr('target.need_centre'); return; }
+  const err = checkTime(mode, range, times, lang);
   if (err) { $('#target-error').textContent = err; return; }
   const body = {
     centreIds: [...chosen],
@@ -370,31 +372,29 @@ $('#form-target').addEventListener('submit', async (ev) => {
 /** null = 全局设置；否则是正在设置的学员 */
 let intervalFor = null;
 function renderIntervalLabel() {
-  $('#interval-label').textContent = `每 ${minutesLabel(state.intervalMs)}刷新`;
+  $('#interval-label').textContent = tr('top.every', { min: minutesLabel(state.intervalMs) });
 }
 function showEstimate() {
   const v = $('#form-interval').elements.interval.value;
   const box = $('#interval-est');
   if (v === 'global') {
-    box.textContent = `跟随全局设置（${minutesLabel(state.intervalMs)}）：${estimate(state.intervalMs / 60_000).text}`;
+    box.textContent = tr('interval.follow_est', { min: minutesLabel(state.intervalMs), est: estimate(state.intervalMs / 60_000).text });
     box.className = 'interval-est';
     return;
   }
   const e = estimate(Number(v));
-  box.textContent = e.text + (e.risky ? '。这是最快的档位，被站点拦截的风险最大，建议只在短时间内使用。' : '。');
+  box.textContent = e.text + tr(e.risky ? 'interval.risky' : 'interval.period');
   box.className = `interval-est ${e.risky ? 'risky' : ''}`;
 }
 function openInterval(s) {
   intervalFor = s ?? null;
-  $('#interval-title').textContent = s ? `刷新间隔：${s.label}` : '刷新设置（所有学员）';
-  $('#interval-scope').textContent = s
-    ? '只对这个学员生效。一般跟随全局设置即可；比如这个学员不急，可以设长一点，把访问量留给别的学员。'
-    : '所有学员默认用这个间隔。改了立刻生效，正在等待的学员按新间隔重新计时。';
+  $('#interval-title').textContent = s ? tr('interval.title_student', { label: s.label }) : tr('interval.title_global');
+  $('#interval-scope').textContent = tr(s ? 'interval.scope_student' : 'interval.scope_global');
   const current = s ? (s.intervalMs ? String(s.intervalMs / 60_000) : 'global') : String(state.intervalMs / 60_000);
-  const opts = (s ? [['global', '跟随全局']] : []).concat(state.intervalChoicesMin.map((m) => [String(m), `${m} 分钟`]));
-  $('#interval-choices').innerHTML = opts.map(([v, t]) =>
-    `<label><input type="radio" name="interval" value="${v}" ${v === current ? 'checked' : ''}> ${t}${v === '2' ? ' <span class="rec">推荐</span>' : ''}</label>`).join('');
-  $('#interval-help').innerHTML = state.intervalHelp.map((p) => `<p>${esc(p)}</p>`).join('');
+  const opts = (s ? [['global', tr('interval.follow')]] : []).concat(state.intervalChoicesMin.map((m) => [String(m), tr('dur.minutes', { n: m })]));
+  $('#interval-choices').innerHTML = opts.map(([v, label]) =>
+    `<label><input type="radio" name="interval" value="${v}" ${v === current ? 'checked' : ''}> ${esc(label)}${v === '2' ? ` <span class="rec">${tr('interval.recommended')}</span>` : ''}</label>`).join('');
+  $('#interval-help').innerHTML = state.intervalHelp.map((p) => `<p>${esc(txt(p))}</p>`).join('');
   $('#interval-error').textContent = '';
   showEstimate();
   $('#dlg-interval').showModal();
@@ -422,10 +422,10 @@ $('#form-interval').addEventListener('submit', async (ev) => {
 function renderLicense(l) {
   state.license = l;
   $('#license-box').hidden = l.ok;
-  $('#license-msg').textContent = l.ok ? '' : l.message;
+  $('#license-msg').textContent = l.ok ? '' : txt(l.message);
   const tag = $('#license-tag');
   tag.hidden = !l.ok || !l.until;
-  if (l.ok && l.until) tag.textContent = `试用至 ${l.until}`;
+  if (l.ok && l.until) tag.textContent = tr('license.tag', { until: l.until });
 }
 $('#license-file').onchange = async (ev) => {
   const file = ev.target.files[0];
@@ -440,18 +440,43 @@ $('#license-file').onchange = async (ev) => {
 
 // ---------- 桌面通知与启动 ----------
 
-function notify(msg) {
+function notify(m) {
   if (!('Notification' in window) || Notification.permission !== 'granted') return;
-  new Notification(msg.title, { body: msg.body, requireInteraction: msg.level === 'attention', icon: '/logo.svg' });
+  new Notification(txt(m.title), { body: txt(m.body), requireInteraction: m.level === 'attention', icon: '/logo.svg' });
 }
+
+// ---------- 语言 ----------
+
+/** 填页面上固定的文字 */
+function applyStatic() {
+  document.documentElement.lang = lang === 'en' ? 'en-AU' : 'zh-CN';
+  for (const el of $$('[data-i18n]')) el.textContent = tr(el.dataset.i18n);
+  for (const el of $$('[data-i18n-html]')) el.innerHTML = tr(el.dataset.i18nHtml);
+  for (const el of $$('[data-i18n-ph]')) el.placeholder = tr(el.dataset.i18nPh);
+  for (const el of $$('[data-i18n-title]')) el.title = tr(el.dataset.i18nTitle);
+  document.title = tr('app.title');
+}
+function renderMode() {
+  const mode = $('#mode');
+  mode.textContent = tr(state.autoRebookEnabled ? 'mode.on' : 'mode.off');
+  mode.className = `sign ${state.autoRebookEnabled ? 'on' : 'off'}`;
+}
+$('#btn-lang').onclick = async () => {
+  const next = lang === 'zh' ? 'en' : 'zh';
+  try { await api('PUT', '/api/settings/language', { language: next }); } catch (e) { alert(e.message); return; }
+  lang = next;
+  applyStatic(); renderMode(); renderIntervalLabel(); renderLicense(state.license);
+  for (const d of $$('dialog[open]')) d.close();
+  await reload();
+};
 $('#btn-notify').onclick = async () => { await Notification.requestPermission(); $('#btn-notify').hidden = Notification.permission === 'granted'; };
 
 try {
   state = await api('GET', '/api/state');
+  lang = state.language || DEFAULT_LANG;
+  applyStatic();
   centreById = new Map(state.centres.map((c) => [c.id, c]));
-  const mode = $('#mode');
-  mode.textContent = state.autoRebookEnabled ? '自动改约：已开启' : '自动改约：未开启 · 只走到确认页';
-  mode.className = `sign ${state.autoRebookEnabled ? 'on' : 'off'}`;
+  renderMode();
   renderIntervalLabel();
   renderLicense(state.license);
   $('#btn-notify').hidden = !('Notification' in window) || Notification.permission === 'granted';
@@ -463,5 +488,5 @@ try {
   setInterval(async () => { try { renderLicense(await api('GET', '/api/license')); } catch { /* 下次再试 */ } }, 60000);
   setInterval(tick, 1000);
 } catch (e) {
-  document.body.innerHTML = `<p style="padding:20px">打不开：${esc(e.message)}。请用软件启动的窗口，不要手动改地址。</p>`;
+  document.body.innerHTML = `<p style="padding:20px">${esc(tr('err.open', { msg: e.message }))}</p>`;
 }

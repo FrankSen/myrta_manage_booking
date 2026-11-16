@@ -6,6 +6,7 @@ import type { Limiter } from '../scheduler/limiter.ts';
 import { Scheduler } from '../scheduler/queue.ts';
 import type { SiteSession } from '../site/session.ts';
 import type { Repo, StudentStatus } from '../storage/repo.ts';
+import { TextError, msg, type Text } from '../i18n.ts';
 import { expectedCycleMs } from '../config/interval.ts';
 import { checkStudent, newCheckState, reportError, rebookSlot, visitsPerRound, type CheckDeps, type NotifyEvent } from './checker.ts';
 
@@ -30,7 +31,7 @@ export interface Progress {
   /** 下一轮开始的时刻；正在跑时为 null */
   nextAt: number | null;
   /** 正在跑时在做什么 */
-  phase: string;
+  phase: Text;
 }
 
 /**
@@ -49,7 +50,7 @@ export class Service {
   private readonly locks = new Map<number, Promise<unknown>>();
   private readonly state = newCheckState();
   private readonly abort = new AbortController();
-  private readonly phases = new Map<number, string>();
+  private readonly phases = new Map<number, Text>();
   private globalIntervalMs: number;
 
   constructor(deps: ServiceDeps) {
@@ -122,7 +123,7 @@ export class Service {
     const s = this.deps.repo.getStudent(id);
     if (!s || s.status === 'done') return;
     this.scheduler.stop(id);
-    this.deps.repo.setStatus(id, 'paused', '教练手动暂停');
+    this.deps.repo.setStatus(id, 'paused', msg('status.manual_pause'));
     void this.withLock(id, () => this.dropSession(id));
   }
 
@@ -195,7 +196,7 @@ export class Service {
         await this.dropSession(id);
         return;
       }
-      this.phases.set(id, '准备');
+      this.phases.set(id, msg('phase.prepare'));
       let outcome;
       try {
         outcome = await checkStudent(id, this.checkDeps());
@@ -255,14 +256,14 @@ export class Service {
 
   private async getSession(id: number): Promise<SiteSession> {
     // 退出过程中不再打开新的浏览器
-    if (this.abort.signal.aborted) throw new Error('程序正在退出');
+    if (this.abort.signal.aborted) throw new TextError(msg('err.exiting'));
     let s = this.sessions.get(id);
     if (!s) {
       s = await this.deps.openSession(id);
       // 浏览器启动要十几秒，期间可能已经开始退出
       if (this.abort.signal.aborted) {
         await s.close().catch(() => {});
-        throw new Error('程序正在退出');
+        throw new TextError(msg('err.exiting'));
       }
       this.sessions.set(id, s);
     }

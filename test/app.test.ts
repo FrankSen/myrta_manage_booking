@@ -3,10 +3,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, test } from 'vitest';
 import { startApp, type App } from '../src/app/start.ts';
-import { loadSettings, saveCheckInterval } from '../src/app/settings-file.ts';
+import { loadSettings, saveCheckInterval, saveLanguage } from '../src/app/settings-file.ts';
 import { DEFAULT_SETTINGS } from '../src/config/settings.ts';
 import { UnavailableSession } from '../src/site/unavailable.ts';
 import { FakeSession, SILVERWATER_NAME } from './helpers/fakes.ts';
+import { render } from '../src/i18n.ts';
 import { mkdirSync, writeFileSync } from 'node:fs';
 
 const centresFile = new URL('../data/nsw-test-centres.json', import.meta.url).pathname;
@@ -94,7 +95,7 @@ describe('装配', () => {
       body: JSON.stringify({ label: 'A', bookingId: '1234567890', surname: 'T' }),
     });
     expect(res.status).toBe(422);
-    expect(((await res.json()) as { error: string }).error).toContain('还没有接入');
+    expect(render('zh', ((await res.json()) as { error: never }).error)).toContain('还没有接入');
     expect(app.repo.listStudents()).toHaveLength(0);
   });
 });
@@ -211,7 +212,7 @@ describe('提交功能未启用', () => {
     const warnings: string[] = [];
     app = await startApp({
       runtimeDir: d, centresFile, openWindow: () => null, openSession: async () => new FakeSession(),
-      finishAvailable: false, warn: (m) => warnings.push(m),
+      finishAvailable: false, warn: (m) => warnings.push(render('zh', m)),
     });
     expect(app.settings.autoRebookEnabled).toBe(false);
     expect(warnings[0]).toContain('自动改约');
@@ -314,5 +315,30 @@ describe('试用授权', () => {
     expect((await call('POST', '/api/license', { text })).status).toBe(200);
     expect(existsSync(join(d, 'license.json'))).toBe(true);
     expect((await call('POST', '/api/students', { label: 'A', bookingId: '1234567890', surname: 'Testsurname' })).status).toBe(201);
+  });
+});
+
+describe('界面语言', () => {
+  test('默认中文；切换后写回 settings.json，重启后保持', async () => {
+    const d = dir();
+    const start = () => startApp({ runtimeDir: d, centresFile, openWindow: () => null, openSession: async () => new FakeSession() });
+    app = await start();
+    const call = (method: string, path: string, b?: unknown) =>
+      fetch(`http://127.0.0.1:${app!.ui.port}${path}`, { method, headers: { 'X-Token': app!.ui.token, 'Content-Type': 'application/json' }, body: b === undefined ? undefined : JSON.stringify(b) });
+    expect(((await (await call('GET', '/api/state')).json()) as { language: string }).language).toBe('zh');
+    expect((await call('PUT', '/api/settings/language', { language: 'fr' })).status).toBe(400);
+    expect((await call('PUT', '/api/settings/language', { language: 'en' })).status).toBe(200);
+    expect(loadSettings(join(d, 'settings.json')).language).toBe('en');
+    await app.stop();
+    app = await start();
+    expect(app.language()).toBe('en');
+  });
+  test('改语言不影响配置文件里的其他内容', () => {
+    const p = join(dir(), 's.json');
+    writeFileSync(p, JSON.stringify({ hidden: { maxActiveStudents: 3 } }));
+    saveCheckInterval(p, 5 * 60_000);
+    saveLanguage(p, 'en');
+    const s = loadSettings(p);
+    expect([s.hidden.maxActiveStudents, s.hidden.checkIntervalMs, s.language]).toEqual([3, 5 * 60_000, 'en']);
   });
 });

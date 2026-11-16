@@ -1,3 +1,4 @@
+import { render } from '../src/i18n.ts';
 import { randomBytes } from 'node:crypto';
 import { afterEach, describe, expect, test } from 'vitest';
 import { DEFAULT_SETTINGS } from '../src/config/settings.ts';
@@ -52,7 +53,7 @@ describe('令牌', () => {
     await setup();
     const res = await fetch(`http://127.0.0.1:${server!.port}/`);
     expect(res.status).toBe(200);
-    expect(await res.text()).toContain('<title>');
+    expect(await res.text()).toContain('<title');
   });
   test('只监听本机地址', async () => {
     await setup();
@@ -92,7 +93,7 @@ describe('学员', () => {
     const { call, repo } = await setup({ fetchCurrent: async () => { throw new Error('Booking number 或姓氏不正确'); } });
     const res = await call('POST', '/api/students', { label: 'A', bookingId: '1234567890', surname: 'T' });
     expect(res.status).toBe(422);
-    expect(((await res.json()) as { error: string }).error).toContain('不正确');
+    expect(render('zh', ((await res.json()) as { error: never }).error)).toContain('不正确');
     expect(repo.listStudents()).toHaveLength(0);
   });
 
@@ -292,7 +293,7 @@ describe('刷新间隔', () => {
     const st = (await (await call('GET', '/api/state')).json()) as { intervalMs: number; intervalChoicesMin: number[]; intervalHelp: string[] };
     expect(st.intervalMs).toBe(2 * 60_000);
     expect(st.intervalChoicesMin[0]).toBe(1);
-    expect(st.intervalHelp.join('')).toContain('为什么不是越快越好');
+    expect(render('zh', st.intervalHelp as never)).toContain('为什么不是越快越好');
   });
 
   test.each([[30_000], [90_000], [-1], ['2'], [null]])('全局间隔不合法：%s → 400', async (ms) => {

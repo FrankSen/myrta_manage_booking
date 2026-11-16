@@ -2,55 +2,57 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<title>驾考改约助手</title>
+<title data-i18n="app.title">驾考改约助手</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" href="/logo.svg">
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
+<!-- 带 data-i18n 的元素由 app.js 按当前语言填文字；data-i18n-html 允许翻译里有 <br>；data-i18n-ph / data-i18n-title 翻译属性 -->
 <header class="topbar">
   <img src="/logo.svg" alt="" class="logo">
   <div class="brand">
-    <h1>驾考改约助手</h1>
-    <div class="sub">myrta.com · NSW 驾考考位自动刷新</div>
+    <h1 data-i18n="app.title"></h1>
+    <div class="sub" data-i18n="app.subtitle"></div>
   </div>
-  <button id="btn-interval" class="sign-btn" title="刷新设置">⏱ <span id="interval-label"></span></button>
+  <button id="btn-interval" class="sign-btn" data-i18n-title="top.interval_title">⏱ <span id="interval-label"></span></button>
   <div class="sign" id="mode"></div>
-  <button id="btn-notify" class="ghost" hidden>开启桌面通知</button>
+  <button id="btn-notify" class="ghost" hidden data-i18n="notify.enable"></button>
   <div class="license-tag" id="license-tag" hidden></div>
+  <button id="btn-lang" class="ghost small" data-i18n="lang.other" data-i18n-title="lang.other_title"></button>
 </header>
 <div class="road"></div>
 
 <main>
   <section id="license-box" class="panel license" hidden>
     <h2><span class="dot red"></span><span id="license-msg"></span></h2>
-    <p class="hint">已有的学员和记录可以查看，但不会刷新，也不能添加学员。导入有效的授权文件后，之前在刷新的学员会自动继续。</p>
-    <label class="file-btn primary">导入授权文件<input type="file" id="license-file" accept=".json,application/json" hidden></label>
+    <p class="hint" data-i18n="license.hint"></p>
+    <label class="file-btn primary"><span data-i18n="license.import"></span><input type="file" id="license-file" accept=".json,application/json" hidden></label>
     <p class="error" id="license-error"></p>
   </section>
 
   <section class="stats" id="stats"></section>
 
   <section id="todo-box" class="panel todo" hidden>
-    <h2><span class="dot amber"></span>需要你处理</h2>
+    <h2><span class="dot amber"></span><span data-i18n="todo.title"></span></h2>
     <div id="todo"></div>
   </section>
 
   <section class="panel">
     <div class="row">
-      <h2>学员</h2>
-      <button id="btn-add" class="primary">＋ 添加学员</button>
+      <h2 data-i18n="students.title"></h2>
+      <button id="btn-add" class="primary" data-i18n="btn.add"></button>
     </div>
     <div id="students"></div>
   </section>
 
   <section class="panel">
     <div class="row">
-      <h2>运行记录</h2>
+      <h2 data-i18n="logs.title"></h2>
       <div class="row tight">
-        <select id="log-student"><option value="">全部学员</option></select>
-        <label class="check"><input type="checkbox" id="log-problems"> 只看问题</label>
-        <button id="log-toggle" class="ghost small">收起</button>
+        <select id="log-student"></select>
+        <label class="check"><input type="checkbox" id="log-problems"> <span data-i18n="logs.problems"></span></label>
+        <button id="log-toggle" class="ghost small"></button>
       </div>
     </div>
     <div id="logs" class="logs"></div>
@@ -59,72 +61,72 @@
 
 <dialog id="dlg-add">
   <form method="dialog" id="form-add">
-    <h3>添加学员</h3>
-    <label>备注名<span class="hint">给自己看，不用写全名</span><input name="label" required autocomplete="off"></label>
-    <label>Booking number<input name="bookingId" inputmode="numeric" required autocomplete="off"></label>
-    <label>姓氏<span class="hint">与预约一致，英文</span><input name="surname" required autocomplete="off"></label>
+    <h3 data-i18n="add.title"></h3>
+    <label><span data-i18n="add.label"></span><span class="hint" data-i18n="add.label_hint"></span><input name="label" required autocomplete="off"></label>
+    <label><span data-i18n="add.booking"></span><input name="bookingId" inputmode="numeric" required autocomplete="off"></label>
+    <label><span data-i18n="add.surname"></span><span class="hint" data-i18n="add.surname_hint"></span><input name="surname" required autocomplete="off"></label>
     <div class="progress" id="add-progress" hidden>
       <div class="bar"><span></span></div>
-      <p>正在登录 myrta.com 读取现有预约，大约 1 到 2 分钟。<br>期间会弹出一个浏览器窗口，请不要操作或关闭它。</p>
+      <p data-i18n-html="add.progress"></p>
     </div>
     <p class="error" id="add-error"></p>
-    <div class="row end"><button value="cancel" formnovalidate id="add-cancel">取消</button><button id="add-submit" value="ok" class="primary">添加并读取预约</button></div>
+    <div class="row end"><button value="cancel" formnovalidate id="add-cancel" data-i18n="btn.cancel"></button><button id="add-submit" value="ok" class="primary" data-i18n="add.submit"></button></div>
   </form>
 </dialog>
 
 <dialog id="dlg-interval" class="wide">
   <form method="dialog" id="form-interval">
-    <h3 id="interval-title">刷新设置</h3>
+    <h3 id="interval-title"></h3>
     <p class="hint" id="interval-scope"></p>
     <div class="interval-choices" id="interval-choices"></div>
     <p class="interval-est" id="interval-est"></p>
     <details class="explain" open>
-      <summary>为什么最小是 1 分钟，为什么不是越快越好</summary>
+      <summary data-i18n="interval.why"></summary>
       <div id="interval-help"></div>
     </details>
     <p class="error" id="interval-error"></p>
-    <div class="row end"><button value="cancel" formnovalidate>取消</button><button id="interval-submit" value="ok" class="primary">保存</button></div>
+    <div class="row end"><button value="cancel" formnovalidate data-i18n="btn.cancel"></button><button id="interval-submit" value="ok" class="primary" data-i18n="btn.save"></button></div>
   </form>
 </dialog>
 
 <dialog id="dlg-target" class="wide">
   <form method="dialog" id="form-target">
-    <h3 id="target-title">设置目标</h3>
+    <h3 id="target-title"></h3>
     <p class="hint" id="target-current"></p>
 
     <fieldset>
-      <legend>目标考点 <span class="hint" id="centre-count"></span></legend>
-      <input type="search" id="centre-search" placeholder="搜索考点或地区，例如 Silverwater、Auburn、2141">
+      <legend><span data-i18n="target.centres"></span> <span class="hint" id="centre-count"></span></legend>
+      <input type="search" id="centre-search" data-i18n-ph="target.search_ph">
       <div id="centre-chosen" class="chips"></div>
       <div id="centre-list" class="centre-list"></div>
     </fieldset>
 
     <fieldset>
-      <legend>日期</legend>
+      <legend data-i18n="target.date"></legend>
       <div class="grid2">
-        <label>最早日期<input type="date" name="dateFrom" required></label>
-        <label>最晚日期<input type="date" name="dateTo" required></label>
+        <label><span data-i18n="target.date_from"></span><input type="date" name="dateFrom" required></label>
+        <label><span data-i18n="target.date_to"></span><input type="date" name="dateTo" required></label>
       </div>
     </fieldset>
 
     <fieldset>
-      <legend>时间 <span class="hint">考位每 15 分钟一档</span></legend>
+      <legend><span data-i18n="target.time"></span> <span class="hint" data-i18n="target.time_hint"></span></legend>
       <div class="seg" role="radiogroup">
-        <label><input type="radio" name="timeMode" value="range" checked> 时间范围</label>
-        <label><input type="radio" name="timeMode" value="times"> 指定时间</label>
+        <label><input type="radio" name="timeMode" value="range" checked> <span data-i18n="target.mode_range"></span></label>
+        <label><input type="radio" name="timeMode" value="times"> <span data-i18n="target.mode_times"></span></label>
       </div>
       <div id="time-range" class="grid2">
-        <label>最早时间<select name="timeFrom" id="time-from"></select></label>
-        <label>最晚时间<select name="timeTo" id="time-to"></select></label>
+        <label><span data-i18n="target.time_from"></span><select name="timeFrom" id="time-from"></select></label>
+        <label><span data-i18n="target.time_to"></span><select name="timeTo" id="time-to"></select></label>
       </div>
       <div id="time-times" hidden>
-        <p class="hint">点选可以接受的考试时间，可多选。只有这些时间算完全符合。</p>
+        <p class="hint" data-i18n="target.times_hint"></p>
         <div id="time-grid" class="time-grid"></div>
       </div>
     </fieldset>
 
     <p class="error" id="target-error"></p>
-    <div class="row end"><button value="cancel" formnovalidate>取消</button><button id="target-submit" value="ok" class="primary">保存目标</button></div>
+    <div class="row end"><button value="cancel" formnovalidate data-i18n="btn.cancel"></button><button id="target-submit" value="ok" class="primary" data-i18n="target.save"></button></div>
   </form>
 </dialog>
 <script type="module" src="/app.js"></script>

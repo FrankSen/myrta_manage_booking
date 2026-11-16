@@ -19,13 +19,23 @@ function readRaw(path: string): Record<string, unknown> {
   return raw as Record<string, unknown>;
 }
 
-/** 把刷新间隔写回配置文件，保留文件里的其他内容。先写临时文件再改名，中途断电也不会写坏 */
-export function saveCheckInterval(path: string, ms: number): void {
+/** 改配置文件里的一组值，保留文件里的其他内容。先写临时文件再改名，中途断电也不会写坏 */
+function patch(path: string, group: 'hidden' | 'ui', values: Record<string, unknown>): void {
   const raw = existsSync(path) ? readRaw(path) : {};
-  const hidden = (raw.hidden && typeof raw.hidden === 'object' ? raw.hidden : {}) as Record<string, unknown>;
-  raw.hidden = { ...hidden, checkIntervalMs: ms };
+  const old = (raw[group] && typeof raw[group] === 'object' ? raw[group] : {}) as Record<string, unknown>;
+  raw[group] = { ...old, ...values };
   mkdirSync(dirname(path), { recursive: true });
   const tmp = `${path}.tmp`;
   writeFileSync(tmp, JSON.stringify(raw, null, 2) + '\n');
   renameSync(tmp, path);
+}
+
+/** 把刷新间隔写回配置文件 */
+export function saveCheckInterval(path: string, ms: number): void {
+  patch(path, 'hidden', { checkIntervalMs: ms });
+}
+
+/** 把界面语言写回配置文件 */
+export function saveLanguage(path: string, language: string): void {
+  patch(path, 'ui', { language });
 }

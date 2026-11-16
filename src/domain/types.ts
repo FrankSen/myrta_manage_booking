@@ -1,3 +1,5 @@
+import type { Text } from '../i18n.ts';
+
 /** 悉尼本地日期，格式 YYYY-MM-DD */
 export type LocalDate = string;
 /** 悉尼本地时间，24 小时制，格式 HH:MM */
@@ -48,8 +50,8 @@ export type MatchKind = 'exact' | 'near' | 'none';
 
 export interface MatchResult {
   kind: MatchKind;
-  /** 给教练看的说明，例如 "距目标考点 5.6 km" */
-  notes: string[];
+  /** 给教练看的说明，例如 "距目标考点 5.6 公里"（可翻译） */
+  notes: Text[];
 }
 
 export type CentreIndex = ReadonlyMap<number, Centre>;

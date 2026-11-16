@@ -1,3 +1,4 @@
+import { msg, type Text } from '../i18n.ts';
 import { minDistanceKm } from './geo.ts';
 import { LOCK_MS, addDays, diffDays, minutesOf, sydneyInstant } from './time.ts';
 import type { CentreIndex, MatchResult, Slot, Target, Tolerance } from './types.ts';
@@ -58,18 +59,18 @@ export function evaluate(
     return { kind: 'exact', notes: [] };
   }
 
-  const notes: string[] = [];
+  const notes: Text[] = [];
 
   if (dateOut > tolerance.maxDateDays) return NONE;
-  if (dateOut > 0) notes.push(`日期超出目标范围 ${dateOut} 天`);
+  if (dateOut > 0) notes.push(msg('near.date', { n: dateOut }));
 
   if (timeOut > tolerance.maxTimeMinutes) return NONE;
-  if (timeOut > 0) notes.push(byTimes ? `与指定时间相差 ${timeOut} 分钟` : `时间超出目标时间段 ${timeOut} 分钟`);
+  if (timeOut > 0) notes.push(msg(byTimes ? 'near.time_times' : 'near.time_range', { n: timeOut }));
 
   if (!centreIsTarget) {
     const km = minDistanceKm(slot.centreId, target.centreIds, centres);
     if (km > tolerance.maxDistanceKm) return NONE;
-    notes.push(`距目标考点 ${km.toFixed(1)} 公里`);
+    notes.push(msg('near.distance', { km: km.toFixed(1) }));
   }
 
   return { kind: 'near', notes };

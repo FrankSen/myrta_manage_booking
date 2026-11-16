@@ -1,4 +1,5 @@
 import { SiteError } from './errors.ts';
+import { msg } from '../i18n.ts';
 import type { SiteSession } from './session.ts';
 
 /**
@@ -7,7 +8,7 @@ import type { SiteSession } from './session.ts';
  */
 export class UnavailableSession implements SiteSession {
   private fail(): never {
-    throw new SiteError('unknown_page', '站点操作模块还没有接入，当前版本不能访问 myrta.com');
+    throw new SiteError('unknown_page', msg('err.unavailable'));
   }
   login(): Promise<never> {
     return Promise.resolve().then(() => this.fail());

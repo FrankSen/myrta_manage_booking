@@ -14,8 +14,9 @@ import { startUiServer, type UiServer } from '../ui/server.ts';
 import { QUIET_ARGS, realFindBrowser } from '../site/browser.ts';
 import { acquireLock } from './lock.ts';
 import { LicenseGate } from '../license/gate.ts';
+import { TextError, msg, render, type Lang, type Text } from '../i18n.ts';
 import { runtimePaths } from './paths.ts';
-import { loadSettings, saveCheckInterval } from './settings-file.ts';
+import { loadSettings, saveCheckInterval, saveLanguage } from './settings-file.ts';
 
 export interface AppOptions {
   runtimeDir: string;
@@ -31,11 +32,13 @@ export interface AppOptions {
    */
   finishAvailable?: boolean;
   /** 启动时给教练的提示，默认打印到控制台 */
-  warn?: (message: string) => void;
+  warn?: (message: Text) => void;
   clock?: Clock;
   port?: number;
   /** 是否检查试用授权。正式入口（Electron、npm start）为 true；测试默认不检查 */
   requireLicense?: boolean;
+  /** 教练切换界面语言后调用（Electron 用来翻译菜单和对话框） */
+  onLanguage?: (lang: Lang) => void;
   /** 测试用：替换验证公钥 */
   licensePublicKey?: string;
 }
@@ -46,6 +49,8 @@ export interface App {
   ui: UiServer;
   settings: Settings;
   license: LicenseGate | null;
+  /** 当前界面语言 */
+  language(): Lang;
   stop(): Promise<void>;
 }
 
@@ -62,7 +67,8 @@ export async function startApp(opts: AppOptions): Promise<App> {
     let settings = opts.settings ?? loadSettings(paths.settings);
     if (opts.finishAvailable === false && settings.autoRebookEnabled) {
       settings = { ...settings, autoRebookEnabled: false };
-      (opts.warn ?? console.warn)('配置里开启了自动改约，但当前版本还不能提交改约，已按"关闭"运行（只走到确认页）');
+      const text = msg('start.auto_rebook_forced');
+      (opts.warn ?? ((m: Text) => console.warn(render(settings.language, m))))(text);
     }
     const clock = opts.clock ?? realClock;
     const centreList = JSON.parse(readFileSync(opts.centresFile, 'utf8')) as Centre[];
@@ -91,6 +97,7 @@ export async function startApp(opts: AppOptions): Promise<App> {
       await probeSession?.close().catch(() => {});
     });
     let ui: UiServer | null = null;
+    let language: Lang = settings.language;
     const service = new Service({
       repo, clock, limiter, settings, centres,
       openSession: (id) => opts.openSession(id, `${paths.browserProfiles}/${id}`),
@@ -104,6 +111,14 @@ export async function startApp(opts: AppOptions): Promise<App> {
       {
         repo, service, centreList,
         license: license ?? undefined,
+        language: {
+          get: () => language,
+          set: (lang) => {
+            language = lang;
+            saveLanguage(paths.settings, lang);
+            opts.onLanguage?.(lang);
+          },
+        },
         autoRebookEnabled: settings.autoRebookEnabled,
         maxDateDays: settings.tolerance.maxDateDays,
         now: () => clock.now(),
@@ -113,7 +128,7 @@ export async function startApp(opts: AppOptions): Promise<App> {
             await limiter.acquire(probeAbort.signal);
             // 每次清空，避免上一个学员的登录状态带到这一个
             rmSync(probeDir, { recursive: true, force: true });
-            if (probeAbort.signal.aborted) throw new Error('程序正在退出');
+            if (probeAbort.signal.aborted) throw new TextError(msg('err.exiting'));
             const session = await opts.openSession(null, probeDir);
             probeSession = session;
             let info: BookingInfo;
@@ -162,6 +177,7 @@ export async function startApp(opts: AppOptions): Promise<App> {
 
     return {
       service, repo, ui: server, settings, license,
+      language: () => language,
       stop: async () => {
         await undo();
       },

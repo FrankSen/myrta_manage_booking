@@ -1,3 +1,4 @@
+import { render } from '../src/i18n.ts';
 import { describe, expect, test } from 'vitest';
 import { checkStudent } from '../src/engine/checker.ts';
 import { sydneyInstant } from '../src/domain/time.ts';
@@ -29,7 +30,7 @@ describe('停止条件', () => {
     const h = harness({ target: { ...baseTarget, dateFrom: '2026-11-11', dateTo: '2026-11-12' } });
     expect(await checkStudent(h.studentId, h.deps)).toBe('stop');
     expect(h.session.calls).toEqual([]);
-    expect(h.repo.getStudent(h.studentId)!.statusNote).toContain('48 小时');
+    expect(render('zh', h.repo.getStudent(h.studentId)!.statusNote)).toContain('48 小时');
   });
 
   test('学员状态不是 running 时不动作', async () => {
@@ -72,7 +73,7 @@ describe('自动改约开启', () => {
     expect(await checkStudent(h.studentId, h.deps)).toBe('stop');
     const s = h.repo.getStudent(h.studentId)!;
     expect(s.status).toBe('paused');
-    expect(s.statusNote).toContain('无法确认改约结果');
+    expect(render('zh', s.statusNote)).toContain('无法确认改约结果');
     expect(h.events.find((e) => e.type === 'rebooked')).toBeUndefined();
     expect(h.events.find((e) => e.type === 'error')).toMatchObject({ kind: 'finish_unverified' });
   });
@@ -157,7 +158,7 @@ describe('过滤与待确认', () => {
     h.session.slotsByCentre.set(AUBURN, [slot(AUBURN, '2026-11-17', '10:00')]);
     await checkStudent(h.studentId, h.deps);
     expect(h.repo.listOffers()[0]).toMatchObject({ centreId: AUBURN });
-    expect(h.repo.listOffers()[0]!.notes[0]).toContain('公里');
+    expect(render('zh', h.repo.listOffers()[0]!.notes[0])).toContain('公里');
   });
 
   test('附近考点轮流：每轮查目标考点 + 一个附近考点，依次推进', async () => {

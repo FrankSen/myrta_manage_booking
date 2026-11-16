@@ -1,3 +1,4 @@
+import { TextError, msg } from '../i18n.ts';
 import { closeSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 
@@ -33,10 +34,10 @@ export function acquireLock(path: string, pid = process.pid): () => void {
       if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
       const other = Number(readFileSync(path, 'utf8').trim());
       if (Number.isInteger(other) && other > 0 && alive(other)) {
-        throw new Error(`程序已经在运行（进程 ${other}）。请不要重复打开`);
+        throw new TextError(msg('lock.running', { pid: other }));
       }
       unlinkSync(path); // 旧锁，进程已经不在了
     }
   }
-  throw new Error('无法获取运行锁');
+  throw new TextError(msg('lock.failed'));
 }

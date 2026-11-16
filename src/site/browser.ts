@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { chromium, type Browser, type Page } from 'playwright-core';
 import { SiteError } from './errors.ts';
+import { TextError, msg } from '../i18n.ts';
 
 type Env = Record<string, string | undefined>;
 
@@ -11,7 +12,7 @@ export function findBrowser(platform: string, exists: (p: string) => boolean, en
   const forced = env.MYRTA_BROWSER;
   if (forced) {
     if (exists(forced)) return forced;
-    throw new Error(`MYRTA_BROWSER 指定的浏览器不存在：${forced}`);
+    throw new TextError(msg('err.browser_forced_missing', { path: forced }));
   }
   const candidates: string[] = [];
   if (platform === 'win32') {
@@ -33,7 +34,7 @@ export function findBrowser(platform: string, exists: (p: string) => boolean, en
     candidates.push('/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/microsoft-edge');
   }
   const found = candidates.find(exists);
-  if (!found) throw new Error('找不到 Chrome 或 Edge。请先安装其中一个，再重新打开本软件');
+  if (!found) throw new TextError(msg('err.no_browser'));
   return found;
 }
 
@@ -133,7 +134,7 @@ export async function launchBrowser(profileDir: string, exe: string = realFindBr
 
   let browser: Browser | null = null;
   for (let i = 0; i < 40 && !browser; i++) {
-    if (spawnError) throw new SiteError('timeout', `浏览器无法启动：${(spawnError as Error).message}`);
+    if (spawnError) throw new SiteError('timeout', msg('err.browser_spawn', { detail: (spawnError as Error).message }));
     await new Promise((r) => setTimeout(r, 500));
     try {
       browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`, { timeout: 3000 });
@@ -143,7 +144,7 @@ export async function launchBrowser(profileDir: string, exe: string = realFindBr
   }
   if (!browser) {
     kill();
-    throw new SiteError('timeout', '浏览器启动后 20 秒内没有响应');
+    throw new SiteError('timeout', msg('err.browser_no_response'));
   }
 
   const context = browser.contexts()[0] ?? (await browser.newContext());
@@ -152,7 +153,7 @@ export async function launchBrowser(profileDir: string, exe: string = realFindBr
   if (!languageOk(langs)) {
     await browser.close().catch(() => {});
     kill();
-    throw new SiteError('widgets_missing', `浏览器语言不是英文（${langs.join(',')}），站点会返回无法使用的中文页面`);
+    throw new SiteError('widgets_missing', msg('err.browser_lang', { langs: langs.join(',') }));
   }
   return {
     browser,

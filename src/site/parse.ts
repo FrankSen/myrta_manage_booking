@@ -1,3 +1,4 @@
+import { TextError, msg } from '../i18n.ts';
 import { parseSlotTime } from '../domain/time.ts';
 import type { BookingInfo, LocalDate, LocalTime } from '../domain/types.ts';
 
@@ -61,14 +62,14 @@ const MONTHS: Record<string, string> = {
 /** 查看预约页和确认页共用：读出考点、日期、时间 */
 export function parseBookingDetails(text: string): BookingInfo {
   const centre = /Test location:[ \t]*([^\n]+)/i.exec(text)?.[1]?.trim();
-  if (!centre) throw new Error('页面上找不到考点（Test location）');
+  if (!centre) throw new TextError(msg('err.parse_centre'));
 
   const d = /Date of test:[ \t]*(?:[A-Za-z]+,[ \t]*)?(\d{1,2})[ \t]+([A-Za-z]+)[ \t]+(\d{4})/i.exec(text);
   const month = d && MONTHS[d[2]!.toLowerCase()];
-  if (!d || !month) throw new Error('页面上找不到日期（Date of test）');
+  if (!d || !month) throw new TextError(msg('err.parse_date'));
 
   const t = /Time of test:[ \t]*(\d{1,2}):(\d{2})[ \t]*(AM|PM)/i.exec(text);
-  if (!t) throw new Error('页面上找不到时间（Time of test）');
+  if (!t) throw new TextError(msg('err.parse_time'));
   let hour = Number(t[1]) % 12;
   if (t[3]!.toUpperCase() === 'PM') hour += 12;
 
