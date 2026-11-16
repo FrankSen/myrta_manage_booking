@@ -4,13 +4,13 @@
 
 | # | 任务 | 主要文件 | 状态 |
 |---|---|---|---|
-| 1 | 学员上限 5、考点上限 2、预计刷新时间 | `config/settings.ts`、`ui/validate.ts`、`config/interval.ts`、`ui/server.ts`、前端 | |
-| 2 | 添加学员复用 probe 目录 | `app/start.ts`、`ui/server.ts` | |
-| 3 | 授权：签名校验、到期、时间回调；生成脚本 | `license/*.ts`、`scripts/license.ts`、`app/start.ts`、`ui/server.ts`、`engine/service.ts` | |
-| 4 | 中英文：翻译表、状态与记录存代码、悉尼时间显示 | `i18n/*`、`engine/checker.ts`、`domain/matcher.ts`、`storage/*`、`notify/notifier.ts`、`ui/*` | |
-| 5 | Electron 主进程：窗口、退出确认、通知、单实例、数据目录、快捷方式 | `electron/main.ts`、`app/start.ts` | |
-| 6 | 打包：Electron 二进制、图标、Info.plist、zip 符号链接 | `scripts/build.ts`、`scripts/zip.ts`、`scripts/icons.ts`、`assets/` | |
-| 7 | 文档：中英文使用手册、iOA 白名单、升级步骤、交接说明 | `docs/*` | |
+| 1 | 学员上限 5、考点上限 2、预计刷新时间 | `config/settings.ts`、`ui/validate.ts`、`config/interval.ts`、`ui/server.ts`、前端 | 完成 |
+| 2 | 添加学员复用 probe 目录 | `app/start.ts`、`ui/server.ts` | 完成 |
+| 3 | 授权：签名校验、到期、时间回调；生成脚本 | `license/*.ts`、`scripts/license.ts`、`app/start.ts`、`ui/server.ts`、`engine/service.ts` | 完成 |
+| 4 | 中英文：翻译表、状态与记录存代码、悉尼时间显示 | `i18n/*`、`engine/checker.ts`、`domain/matcher.ts`、`storage/*`、`notify/notifier.ts`、`ui/*` | 完成 |
+| 5 | Electron 主进程：窗口、退出确认、通知、单实例、数据目录、快捷方式 | `electron/main.ts`、`app/start.ts` | 完成 |
+| 6 | 打包：Electron 二进制、图标、Info.plist、zip 符号链接 | `scripts/build.ts`、`scripts/zip.ts`、`scripts/icons.ts`、`assets/` | 完成 |
+| 7 | 文档：中英文使用手册、iOA 白名单、升级步骤、交接说明 | `docs/*` | 完成 |
 | 8 | 联网验证（Mac 包）与 Chrome 最小化实测 | — | |
 
 ## 测试运行
