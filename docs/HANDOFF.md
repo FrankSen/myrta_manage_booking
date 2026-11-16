@@ -1,10 +1,10 @@
 # 交接说明（新会话先读这个）
 
-更新时间：2026-11-12。项目目录：`/Users/smy/workstation/myrta_manage_booking`，git 仓库。本次工作在分支 `feat/real-session`，尚未合并到 main。
+更新时间：2026-11-16。项目目录：`/Users/smy/workstation/myrta_manage_booking`，git 仓库。当前分支 `feat/electron-app`（基于 `feat/real-session`），都尚未合并到 main。
 
 ## 项目是什么
 
-给驾校教练用的 Windows 桌面工具。教练为每个学员设定目标考点和时间段，工具持续刷新 myrta.com（NSW 驾考预约），出现完全符合的考位就自动改约，出现接近的考位就通知教练确认。
+给驾校教练用的桌面独立应用（Electron，Windows 为主，也有 Mac 版）。教练为每个学员设定目标考点和时间段，工具持续刷新 myrta.com（NSW 驾考预约），出现完全符合的考位就自动改约，出现接近的考位就通知教练确认。
 
 必读文档：
 - `docs/requirements-architecture.md`：需求、规则、站点行为、架构图、风险
@@ -16,7 +16,10 @@
 - 改约成功后，该学员任务结束；不满意由教练重新发起。
 - 同时刷新的学员上限 2 个、间隔 2 分钟，放在隐藏配置里，界面不显示。
 - 通知只做桌面通知。先做 Windows，架构保持跨平台。
-- 技术选型：Node 24 本地服务 + Chrome `--app` 窗口界面，**不用 Electron**（本机下载 Electron 二进制太慢）。数据库用 `node:sqlite`。
+- 技术选型（2026-11-16 改）：**Electron 38.7.2 独立应用**。主进程跑引擎、`node:sqlite` 数据库和本地界面服务，界面是 Electron 窗口。**学员刷新仍用本机 Chrome/Edge**：Electron 自带的 Chromium 访问 myrta.com 返回 403（改 UA 和 `sec-ch-ua` 也不行），见 `docs/specs/2026-11-16-electron-app-design.md`。Electron 二进制从 npmmirror 下载（`scripts/electron-bin.ts`），不走 electron 包自带的 GitHub 下载。
+- 同时刷新上限 5 个学员（隐藏配置），每个学员最多 2 个考点。
+- 试用授权：Ed25519 签名的 `license.json`，只限到期日期（悉尼时间当天结束），发现电脑时间调回就停。私钥在 `~/.myrta-license/private.pem`，**不入库**，丢了要换密钥对并改 `src/license/public-key.ts`，已发的授权全部失效。签发：`node scripts/license.ts --name 张教练 --until 2026-12-31`。
+- 界面中英文可切换，默认中文。状态、记录、错误存成 `{k, a}` 消息（`src/ui/public/i18n.js`，界面和服务端共用），旧数据的中文句子原样显示。时间一律按悉尼时间显示。
 - 不能改到距现在不足 48 小时的考位；原考试不足 48 小时则预约锁定，停止该学员。
 
 ## 当前进度
@@ -65,15 +68,27 @@
 - 数据库加列由 `migrate()` 自动完成，旧数据库直接可用。
 - 联网验证（Mac 包）：真实一轮约 2 分钟（新资料目录首次登录约 60 秒 + 两个考点），轮数和倒计时正确；Du 预约未变。
 
+## 2026-11-16 做了什么（设计 `docs/specs/2026-11-16-electron-app-design.md`，计划 `docs/plans/2026-11-16-electron-app-plan.md`）
+
+- 改为 Electron 独立应用：`src/electron/main.ts`。关窗口 = 退出（有学员在刷新/正在改约时先确认），单实例，数据在 `%APPDATA%\MyRTA Rebook` / `~/Library/Application Support/MyRTA Rebook`，Windows 首次运行建桌面和开始菜单快捷方式。去掉了 Chrome `--app` 界面窗口和 `启动.bat`/`启动.command`。`npm start` 仍可用（开发调试，打印界面地址）。`npm run app` 用 Electron 跑开发版。
+- 打包 `node scripts/build.ts <win-x64|mac-arm64|mac-x64>`：Windows `MyRTA Rebook.exe`（resedit 改图标和版本信息），zip 约 136MB；Mac `MyRTA Rebook.app`（改 Info.plist，本机临时签名 `codesign -s -`），zip 约 111MB。应用代码在 `resources/app`，不打 asar。图标由 `scripts/icons.ts` 从 logo.svg 生成，结果在 `assets/`。
+- iOA"下载完成"弹窗：不是下载，是 Chrome 往资料目录写 LOCK/LOG 等文件。添加学员时读取用的 `probe` 目录改名给该学员用，少建一个资料目录。彻底解决要把数据目录下 `browser-profile` 加白名单，写进了使用手册。
+- 5 个学员：上限 5、每人最多 2 个考点、卡片显示"预计每 X 分钟刷新一次"（`expectedCycleMs`：设定间隔 + 一轮耗时，和"全部学员一轮总访问次数 × 20 秒"取大）。
+- 试用授权、中英文界面，见上面"已确定的决定"。
+- 测试 305 个，Node 24（`npm test`）和 Electron 内置 Node 22（`npm run test:electron`）都通过。
+- Mac 包本地验证：带隔离标记解压 → 去标记 → 打开，界面窗口正常、授权提示正常、外部链接被拦、关闭后进程退出。
+
 ## 下一步（按顺序）
 
-1. **在真实 Windows 上走一遍**（计划任务 9 步骤 4）：解压 zip，双击 `启动.bat`，看界面能打开、中文不乱码、能找到 Chrome/Edge、添加学员能读到预约、关掉黑窗口后浏览器都关了。macOS 上验证不了这些。重点怀疑：`chcp 65001` 下中文显示；Windows 上没有 `LANG`，浏览器语言只靠 `--lang`/`--accept-lang`，要看 `navigator.languages`；关窗口时 SIGHUP 的收尾时间是否够。
-2. 把分支 `feat/real-session` 合并到 main（问用户）。
-3. 以上做完后告诉教练，等教练通知再做任务 10。
+1. **联网验证 Electron 版**（计划任务 8）：Mac 包导入授权 → 添加 Du → 刷新一轮；实测学员 Chrome 启动后最小化站点是否拦截；关窗口后所有 Chrome 关闭；替换程序后重新打开，Du 自动继续、轮数保留；全新会话核对 Du 预约未变。
+2. **在真实 Windows 上走一遍**：解压 zip，双击 `MyRTA Rebook.exe`，看 SmartScreen 提示、快捷方式、中文显示（英文 Windows 也要看）、能找到 Chrome/Edge、添加学员能读到预约、关窗口后浏览器都关了、iOA 弹窗是否减少。
+3. 把分支合并到 main（问用户）。
+4. 以上做完后告诉教练，等教练通知再做任务 10（真实改约）。
 
 ## 本机环境要点
 
-- 开发机 macOS，Node v24.14.0。npm 默认镜像（npmmirror）会卡住，`.npmrc` 已指向 `registry.npmjs.org`。
+- 开发机 macOS，Node v24.14.0。npm 默认镜像（npmmirror）会卡住，`.npmrc` 已指向 `registry.npmjs.org`。装依赖要设 `ELECTRON_SKIP_BINARY_DOWNLOAD=1`，再 `node scripts/electron-bin.ts` 取 Electron 二进制。
+- Electron 窗口排查：`MYRTA_DEBUG_PORT=9333` 开放界面窗口的调试端口，可用 Playwright `connectOverCDP` 连上截图。
 - `node src/xxx.ts` 可直接运行 TS；`tsconfig` 开了 `erasableSyntaxOnly`，不能用构造函数参数属性、enum 等。
 - 脚本里别用 `timeout` 命令（本机没有）；联网脚本自己设硬超时。
 - macOS 的 `sed -i` 要写 `sed -i ''`，复杂替换用 python。
@@ -107,4 +122,4 @@
 
 ## 隐私约束
 
-Booking number、姓氏、聊天内容不写进代码、测试、夹具、文档。测试用假数据（`1234567890` / `Testsurname`）。运行时数据在 `runtime/`，已忽略。教练聊天截图 `feature_issuejpg.jpg` 同样不入库。`/tmp/myrta_probe` 里还有早期探测脚本和聊天 OCR 文字，含对话内容，清理前先问用户。
+Booking number、姓氏、聊天内容不写进代码、测试、夹具、文档。测试用假数据（`1234567890` / `Testsurname`）。运行时数据在系统应用数据目录（`npm start` 时是项目里的 `runtime/`，已忽略）。教练聊天截图 `feature_issuejpg.jpg` 同样不入库。`/tmp/myrta_probe` 里还有早期探测脚本和聊天 OCR 文字，含对话内容，清理前先问用户。
