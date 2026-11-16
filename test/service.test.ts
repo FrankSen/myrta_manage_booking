@@ -456,3 +456,27 @@ describe('rebookingIds', () => {
     await t.service.stopAll();
   });
 });
+
+describe('退出时等浏览器关完', () => {
+  test('暂停后马上退出：stopAll 等暂停时开始的关闭完成，即使超过 3 秒', { timeout: 10_000 }, async () => {
+    const t = setup();
+    const id = t.addStudent();
+    t.service.startStudent(id);
+    await t.clock.advance(0);
+    const s = t.sessions.get(id)!;
+    let release!: () => void;
+    let closed = false;
+    s.close = () => new Promise<void>((r) => { release = () => { closed = true; r(); }; });
+    t.service.pauseStudent(id);
+    await new Promise((r) => setTimeout(r, 0));
+    const stopping = t.service.stopAll();
+    let done = false;
+    void stopping.then(() => (done = true));
+    // 真实浏览器退出可能超过 3 秒（stopAll 等页面操作的上限）
+    await new Promise((r) => setTimeout(r, 3300));
+    expect(done).toBe(false);
+    release();
+    await stopping;
+    expect(closed).toBe(true);
+  });
+});

@@ -48,6 +48,8 @@ export class Service {
   private readonly deps: ServiceDeps;
   private readonly scheduler: Scheduler;
   private readonly sessions = new Map<number, SiteSession>();
+  /** 正在关闭的浏览器。退出时要等它们关完，否则程序先退出，浏览器会留在后台 */
+  private readonly closing = new Set<Promise<void>>();
   private readonly locks = new Map<number, Promise<unknown>>();
   private readonly state = newCheckState();
   private readonly abort = new AbortController();
@@ -164,6 +166,8 @@ export class Service {
     ]);
     clearTimeout(timer);
     await Promise.allSettled([...this.sessions.keys()].map((id) => this.dropSession(id)));
+    // 暂停、出错时开始关闭、还没关完的浏览器
+    await Promise.allSettled([...this.closing]);
   }
 
   activeIds(): number[] {
@@ -290,10 +294,14 @@ export class Service {
     const s = this.sessions.get(id);
     if (!s) return;
     this.sessions.delete(id);
-    try {
-      await s.close();
-    } catch {
+    const p = s.close().catch(() => {
       // 关闭失败不影响流程
+    });
+    this.closing.add(p);
+    try {
+      await p;
+    } finally {
+      this.closing.delete(p);
     }
   }
 
