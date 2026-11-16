@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 // @ts-expect-error 浏览器端的普通 JS 模块，没有类型声明
-import { countdown, estimate, remaining } from '../src/ui/public/format.js';
+import { countdown, cycleLabel, estimate, remaining } from '../src/ui/public/format.js';
 
 describe('countdown', () => {
   test('分:秒，向上取整', () => {
@@ -27,4 +27,12 @@ describe('estimate', () => {
     expect(estimate(2).risky).toBe(false);
   });
   test('1 分钟标为有风险', () => expect(estimate(1).risky).toBe(true));
+});
+
+describe('cycleLabel', () => {
+  test('按半分钟取整', () => {
+    expect(cycleLabel(5 * 60_000)).toBe('5 分钟');
+    expect(cycleLabel(205_000)).toBe('3.5 分钟');
+    expect(cycleLabel(10_000)).toBe('0.5 分钟');
+  });
 });

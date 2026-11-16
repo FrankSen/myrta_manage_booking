@@ -32,6 +32,12 @@ export function estimate(intervalMin) {
   };
 }
 
+/** 预计刷新周期：半分钟取整，如 3、3.5 分钟 */
+export function cycleLabel(ms) {
+  const half = Math.max(1, Math.round(ms / 30_000));
+  return `${half % 2 === 0 ? half / 2 : (half / 2).toFixed(1)} 分钟`;
+}
+
 export function minutesLabel(ms) {
   return `${Math.round(ms / 60_000)} 分钟`;
 }

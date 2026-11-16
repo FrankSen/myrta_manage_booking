@@ -11,7 +11,7 @@ import type { BookingInfo } from '../domain/types.ts';
 import type { Repo, Student } from '../storage/repo.ts';
 import { INTERVAL_CHOICES_MIN, INTERVAL_HELP } from '../config/interval.ts';
 import { DEFAULT_TOLERANCE, refreshDeadline } from '../domain/matcher.ts';
-import { ValidationError, parseInterval, parseNewStudent, parseTarget } from './validate.ts';
+import { MAX_CENTRES, ValidationError, parseInterval, parseNewStudent, parseTarget } from './validate.ts';
 
 export interface UiDeps {
   repo: Repo;
@@ -51,8 +51,10 @@ const MIME: Record<string, string> = {
 };
 
 /** 对外只给 Booking number 的末 3 位，姓氏不返回 */
-export function publicStudent(s: Student, service?: Pick<Service, 'progress' | 'intervalFor'>, maxDateDays = DEFAULT_TOLERANCE.maxDateDays) {
+export function publicStudent(s: Student, service?: Pick<Service, 'progress' | 'intervalFor' | 'expectedCycle'>, maxDateDays = DEFAULT_TOLERANCE.maxDateDays) {
   return {
+    /** 预计实际多久刷新一次（排队后），学员多、考点多时比设定间隔慢 */
+    expectedCycleMs: service && s.target.centreIds.length > 0 ? service.expectedCycle(s.id) : null,
     rounds: s.rounds,
     lastRoundAt: s.lastRoundAt,
     intervalMs: s.intervalMs,
@@ -150,6 +152,7 @@ export async function startUiServer(deps: UiDeps, opts: { port?: number; token?:
         messages: recentMessages,
         intervalMs: deps.service.globalInterval(),
         intervalChoicesMin: INTERVAL_CHOICES_MIN,
+        maxCentres: MAX_CENTRES,
         intervalHelp: INTERVAL_HELP,
         now: deps.now(),
       });

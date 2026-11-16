@@ -46,13 +46,11 @@ describe('启动与暂停', () => {
     expect(t.sessions.get(id)!.calls[0]).toBe('login');
   });
 
-  test('超过学员上限：返回 false，第三个学员状态不变', async () => {
+  test('默认最多 5 个学员同时刷新：第 6 个返回 false，状态不变', async () => {
     const t = setup();
-    const [a, b, c] = [t.addStudent('A'), t.addStudent('B'), t.addStudent('C')] as [number, number, number];
-    expect(t.service.startStudent(a)).toBe(true);
-    expect(t.service.startStudent(b)).toBe(true);
-    expect(t.service.startStudent(c)).toBe(false);
-    expect(t.repo.getStudent(c)!.status).toBe('idle');
+    const ids = ['A', 'B', 'C', 'D', 'E', 'F'].map((l) => t.addStudent(l));
+    expect(ids.map((id) => t.service.startStudent(id))).toEqual([true, true, true, true, true, false]);
+    expect(t.repo.getStudent(ids[5]!)!.status).toBe('idle');
     await t.service.stopAll();
   });
 
@@ -384,5 +382,33 @@ describe('刷新间隔与进度', () => {
     expect(t.service.intervalFor(id)).toBe(3 * MIN);
     expect(t.service.progress(id)!.nextAt).toBe(NOW + 3 * MIN);
     await t.service.stopAll();
+  });
+});
+
+describe('预计刷新周期', () => {
+  test('一个学员：设定间隔加一轮耗时', () => {
+    const t = setup();
+    const id = t.addStudent();
+    // Silverwater 10 公里内有别的考点，一轮访问 2 次
+    expect(t.service.visits(id)).toBe(2);
+    expect(t.service.expectedCycle(id)).toBe(2 * MIN + 15_000 + 2 * 35_000);
+  });
+
+  test('5 个学员各 2 个考点：排队时间超过设定间隔', async () => {
+    const t = setup();
+    const ids = ['A', 'B', 'C', 'D', 'E'].map((l) => t.addStudent(l));
+    for (const id of ids) t.repo.updateTarget(id, { ...baseTarget, centreIds: [SILVERWATER, 112] });
+    for (const id of ids) t.service.startStudent(id);
+    // 每人 3 次（2 个目标 + 1 个附近），共 15 次 × 20 秒 = 5 分钟
+    expect(t.service.expectedCycle(ids[0]!)).toBe(5 * MIN);
+    await t.service.stopAll();
+  });
+
+  test('没在刷新的学员按"加上它之后"估算', () => {
+    const t = setup({ hidden: { ...DEFAULT_SETTINGS.hidden, checkIntervalMs: MIN } });
+    const a = t.addStudent('A');
+    const b = t.addStudent('B');
+    t.service.startStudent(a);
+    expect(t.service.expectedCycle(b)).toBe(Math.max(MIN + 15_000 + 70_000, 4 * 20_000));
   });
 });

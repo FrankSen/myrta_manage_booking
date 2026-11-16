@@ -140,6 +140,12 @@ async function runRound(student: Student, deps: CheckDeps): Promise<CheckOutcome
   return 'continue';
 }
 
+/** 一轮要访问站点几次：每个目标考点一次，有附近考点时再加一次 */
+export function visitsPerRound(centreIds: readonly number[], tolerance: Tolerance, centres: CentreIndex): number {
+  if (centreIds.length === 0) return 0;
+  return centreIds.length + (nearbyCentres(centreIds, tolerance.maxDistanceKm, centres).length > 0 ? 1 : 0);
+}
+
 /** 目标考点每轮都查；附近考点每轮轮流查一个 */
 function centresToCheck(student: Student, deps: CheckDeps): number[] {
   const ids = [...student.target.centreIds];

@@ -24,7 +24,7 @@ export interface Settings {
 
 export const DEFAULT_SETTINGS: Settings = {
   hidden: {
-    maxActiveStudents: 2,
+    maxActiveStudents: 5,
     checkIntervalMs: 2 * 60_000,
     jitterRatio: 0.2,
     globalMinGapMs: 20_000,

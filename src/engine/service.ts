@@ -6,7 +6,8 @@ import type { Limiter } from '../scheduler/limiter.ts';
 import { Scheduler } from '../scheduler/queue.ts';
 import type { SiteSession } from '../site/session.ts';
 import type { Repo, StudentStatus } from '../storage/repo.ts';
-import { checkStudent, newCheckState, reportError, rebookSlot, type CheckDeps, type NotifyEvent } from './checker.ts';
+import { expectedCycleMs } from '../config/interval.ts';
+import { checkStudent, newCheckState, reportError, rebookSlot, visitsPerRound, type CheckDeps, type NotifyEvent } from './checker.ts';
 
 export interface ServiceDeps {
   repo: Repo;
@@ -73,6 +74,24 @@ export class Service {
   /** 学员的刷新间隔：单独设置的优先，否则用全局设置 */
   intervalFor(id: number): number {
     return this.deps.repo.getStudent(id)?.intervalMs ?? this.globalIntervalMs;
+  }
+
+  /** 学员一轮要访问站点几次 */
+  visits(id: number): number {
+    const s = this.deps.repo.getStudent(id);
+    return s ? visitsPerRound(s.target.centreIds, this.deps.settings.tolerance, this.deps.centres) : 0;
+  }
+
+  /**
+   * 预计每隔多久真正刷新一次（毫秒）。学员没在刷新时，按"加上它之后"估算。
+   * 正在刷新的学员越多、考点越多，排队越久，比设定间隔慢
+   */
+  expectedCycle(id: number): number {
+    const active = new Set(this.scheduler.activeIds());
+    active.add(id);
+    let total = 0;
+    for (const a of active) total += this.visits(a);
+    return expectedCycleMs({ intervalMs: this.intervalFor(id), ownVisits: this.visits(id), totalVisits: total, gapMs: this.deps.settings.hidden.globalMinGapMs });
   }
 
   globalInterval(): number {

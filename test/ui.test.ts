@@ -135,6 +135,7 @@ describe('目标校验', () => {
     ['时间格式不对', { ...goodTarget, timeFrom: '9am' }],
     ['没有选考点', { ...goodTarget, centreIds: [] }],
     ['考点不存在', { ...goodTarget, centreIds: [99999] }],
+    ['超过 2 个考点', { ...goodTarget, centreIds: [SILVERWATER, 112, 20] }],
   ])('不合法：%s → 400，且不保存', async (_name, bad) => {
     const { call, repo } = await setup();
     const id = await create(call);
@@ -185,14 +186,13 @@ describe('开始与暂停', () => {
   test('超过上限：409，界面看不到上限数字', async () => {
     const { call, service } = await setup();
     const ids: number[] = [];
-    for (const l of ['A', 'B', 'C']) {
+    for (const l of ['A', 'B', 'C', 'D', 'E', 'F']) {
       ids.push(((await (await call('POST', '/api/students', { label: l, bookingId: '1234567890', surname: 'T' })).json()) as { id: number }).id);
     }
-    expect((await call('POST', `/api/students/${ids[0]}/start`)).status).toBe(200);
-    expect((await call('POST', `/api/students/${ids[1]}/start`)).status).toBe(200);
-    const res = await call('POST', `/api/students/${ids[2]}/start`);
+    for (const id of ids.slice(0, 5)) expect((await call('POST', `/api/students/${id}/start`)).status).toBe(200);
+    const res = await call('POST', `/api/students/${ids[5]}/start`);
     expect(res.status).toBe(409);
-    expect(JSON.stringify(await res.json())).not.toMatch(/\b2\b/);
+    expect(JSON.stringify(await res.json())).not.toMatch(/\b5\b/);
     const state = JSON.stringify(await (await call('GET', '/api/state')).json());
     expect(state).not.toContain('maxActiveStudents');
     expect(state).not.toContain('checkInterval');

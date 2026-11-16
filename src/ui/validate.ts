@@ -8,6 +8,9 @@ const QUARTER = /^([01]\d|2[0-3]):(00|15|30|45)$/;
 
 export class ValidationError extends Error {}
 
+/** 每个学员最多选几个考点。考点越多一轮越慢，5 个学员一起刷新时会拖慢所有人 */
+export const MAX_CENTRES = 2;
+
 function isRealDate(s: string): boolean {
   if (!DATE.test(s)) return false;
   const [y, m, d] = s.split('-').map(Number) as [number, number, number];
@@ -21,6 +24,7 @@ export function parseTarget(raw: unknown, knownCentreIds: ReadonlySet<number>): 
   const o = raw as Record<string, unknown>;
   const ids = o.centreIds;
   if (!Array.isArray(ids) || ids.length === 0) throw new ValidationError('至少选择一个考点');
+  if (new Set(ids.map(String)).size > MAX_CENTRES) throw new ValidationError(`每个学员最多选 ${MAX_CENTRES} 个考点`);
   const centreIds = ids.map((x) => Number(x));
   for (const id of centreIds) {
     if (!Number.isInteger(id) || !knownCentreIds.has(id)) throw new ValidationError(`未知考点：${String(id)}`);

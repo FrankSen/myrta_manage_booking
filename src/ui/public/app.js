@@ -1,5 +1,5 @@
 import { checkTime, describeTime, onFromChange, onToChange, quarterTimes } from './time-options.js';
-import { countdown, estimate, minutesLabel, remaining } from './format.js';
+import { countdown, cycleLabel, estimate, minutesLabel, remaining } from './format.js';
 
 const token = new URLSearchParams(location.search).get('t') || '';
 const $ = (s) => document.querySelector(s);
@@ -90,7 +90,8 @@ function runLine(s) {
   const parts = [];
   const left = s.deadline ? s.deadline.at - serverNow() : 0;
   const leftText = remaining(left);
-  const interval = `<span>间隔 <b>${minutesLabel(s.effectiveIntervalMs)}</b>${s.intervalMs ? '（单独设置）' : ''}</span>`;
+  const interval = `<span>间隔 <b>${minutesLabel(s.effectiveIntervalMs)}</b>${s.intervalMs ? '（单独设置）' : ''}</span>`
+    + (s.expectedCycleMs ? `<span title="包括一轮本身的耗时，以及和其他学员排队的时间">预计每 <b>${cycleLabel(s.expectedCycleMs)}</b> 刷新一次</span>` : '');
   if (s.status === 'running') {
     parts.push(`<span>已查 <b>${s.rounds}</b> 轮</span>`);
     const p = s.progress;
@@ -260,11 +261,17 @@ function renderCentres() {
   $('#centre-list').innerHTML = list.map((c) => `<label><input type="checkbox" value="${c.id}" ${chosen.has(c.id) ? 'checked' : ''}> ${esc(c.name)}<span class="suburb">${esc(c.suburb || '')} ${esc(c.postcode || '')}</span></label>`).join('')
     || '<p class="hint" style="padding:6px 10px">没有找到</p>';
   $('#centre-chosen').innerHTML = [...chosen].map((id) => `<span class="chip">${esc(centreName(id))}<button type="button" data-remove="${id}" title="去掉">×</button></span>`).join('');
-  $('#centre-count').textContent = chosen.size ? `已选 ${chosen.size} 个` : '';
+  $('#centre-count').textContent = `已选 ${chosen.size} / ${state.maxCentres} 个`;
 }
 $('#centre-search').oninput = renderCentres;
 $('#centre-list').onchange = (ev) => {
   const id = Number(ev.target.value);
+  if (ev.target.checked && chosen.size >= state.maxCentres) {
+    ev.target.checked = false;
+    $('#target-error').textContent = `每个学员最多选 ${state.maxCentres} 个考点。考点越多一轮越慢，会拖慢所有学员`;
+    return;
+  }
+  $('#target-error').textContent = '';
   if (ev.target.checked) chosen.add(id); else chosen.delete(id);
   renderCentres();
 };

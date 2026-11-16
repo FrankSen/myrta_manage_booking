@@ -14,3 +14,17 @@ export const INTERVAL_HELP = [
   '为什么最小是 1 分钟：再小，两轮之间几乎没有停顿，和不停访问没有区别，被拦的风险最大，找到考位的速度却快不了多少，因为一轮本身就要 1 分钟以上。',
   '另外，任意两次访问站点之间至少隔 20 秒，这一条不能调，用来兜底。',
 ];
+
+/** 一轮里除了查考点之外的固定耗时（回到预约页），以及每查一个考点的耗时，实测平均值 */
+export const ROUND_BASE_MS = 15_000;
+export const PER_CENTRE_MS = 35_000;
+
+/**
+ * 某个学员实际多久刷新一次（毫秒）。两个下限取较大的：
+ * 自己的间隔加上一轮本身的耗时；所有正在刷新的学员一轮总访问次数 × 全局访问间隔（大家排队共用一个出口）。
+ */
+export function expectedCycleMs(o: { intervalMs: number; ownVisits: number; totalVisits: number; gapMs: number }): number {
+  const own = o.intervalMs + ROUND_BASE_MS + o.ownVisits * PER_CENTRE_MS;
+  const shared = o.totalVisits * o.gapMs;
+  return Math.max(own, shared);
+}

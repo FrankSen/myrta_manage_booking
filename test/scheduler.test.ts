@@ -108,11 +108,10 @@ describe('Scheduler', () => {
 
   test('超过学员上限的 start 返回 false，已在运行的重复 start 返回 true', () => {
     const { sch } = mk(async () => {});
+    for (let i = 1; i <= H.maxActiveStudents; i++) expect(sch.start(i)).toBe(true);
+    expect(sch.start(H.maxActiveStudents + 1)).toBe(false);
     expect(sch.start(1)).toBe(true);
-    expect(sch.start(2)).toBe(true);
-    expect(sch.start(3)).toBe(false);
-    expect(sch.start(1)).toBe(true);
-    expect(sch.activeIds()).toEqual([1, 2]);
+    expect(sch.activeIds()).toHaveLength(H.maxActiveStudents);
   });
 
   test('间隔在 ±20% 之内：random 取 0 和 1 的两个极端', async () => {

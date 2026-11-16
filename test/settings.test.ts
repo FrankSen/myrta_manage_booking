@@ -3,7 +3,7 @@ import { DEFAULT_SETTINGS, mergeSettings } from '../src/config/settings.ts';
 
 describe('settings', () => {
   test('默认值：2 个学员、2 分钟、自动改约关闭', () => {
-    expect(DEFAULT_SETTINGS.hidden.maxActiveStudents).toBe(2);
+    expect(DEFAULT_SETTINGS.hidden.maxActiveStudents).toBe(5);
     expect(DEFAULT_SETTINGS.hidden.checkIntervalMs).toBe(120_000);
     expect(DEFAULT_SETTINGS.autoRebookEnabled).toBe(false);
     expect(DEFAULT_SETTINGS.tolerance).toEqual({ maxDistanceKm: 10, maxTimeMinutes: 60, maxDateDays: 0 });
