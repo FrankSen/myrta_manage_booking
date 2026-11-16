@@ -74,8 +74,8 @@ After adding a student the "Set target" dialog opens. You can change it later wi
    - Specific times: click the exact times you'd accept (e.g. 08:00, 09:15, 13:30). Only these count as an exact match.
 4. Click "Save target", then "Start". The status becomes "Refreshing".
 
-While refreshing, each student has their own browser window that the app operates. You can minimise it,
-but don't close it or click in it. myrta.com blocks invisible "background" browsers, so the window is required.
+While refreshing, each student has their own browser window that the app operates. It is minimised
+automatically and shows in the taskbar (the Dock on a Mac). Don't close it or click in it. myrta.com blocks invisible "background" browsers, so the window is required.
 
 Up to 5 students can refresh at once. Besides your centres, the app also checks one nearby centre (within 10 km).
 

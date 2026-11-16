@@ -11,7 +11,7 @@
 | 5 | Electron 主进程：窗口、退出确认、通知、单实例、数据目录、快捷方式 | `electron/main.ts`、`app/start.ts` | 完成 |
 | 6 | 打包：Electron 二进制、图标、Info.plist、zip 符号链接 | `scripts/build.ts`、`scripts/zip.ts`、`scripts/icons.ts`、`assets/` | 完成 |
 | 7 | 文档：中英文使用手册、iOA 白名单、升级步骤、交接说明 | `docs/*` | 完成 |
-| 8 | 联网验证（Mac 包）与 Chrome 最小化实测 | — | |
+| 8 | 联网验证（Mac 包）与 Chrome 最小化实测 | — | 完成 |
 
 ## 测试运行
 - Node 24：`npm test`
