@@ -234,6 +234,14 @@ describe('待确认考位', () => {
     const res = await t.call('POST', `/api/offers/${t.offerId}/accept`);
     expect(await res.json()).toEqual({ result: 'dry_run' });
     expect(session.calls).not.toContain('finish');
+    // 停在确认页：学员数据里带保留信息，可以再显示窗口、放弃
+    const st = (await (await t.call('GET', '/api/students')).json()).students[0];
+    expect(st.hold).toMatchObject({ slot: { date: '2026-11-17', time: '13:00' } });
+    expect(await (await t.call('POST', `/api/students/${st.id}/hold/reveal`)).json()).toEqual({ result: 'ok' });
+    expect(await (await t.call('POST', `/api/students/${st.id}/hold/abandon`)).json()).toEqual({ result: 'resumed' });
+    expect(await (await t.call('POST', `/api/students/${st.id}/hold/submitted`)).json()).toEqual({ result: 'not_held' });
+    expect((await t.call('POST', '/api/students/9999/hold/abandon')).status).toBe(404);
+    await t.service.stopAll();
   });
 });
 

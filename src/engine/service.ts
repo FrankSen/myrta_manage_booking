@@ -6,10 +6,10 @@ import type { Limiter } from '../scheduler/limiter.ts';
 import { Scheduler } from '../scheduler/queue.ts';
 import type { SiteSession } from '../site/session.ts';
 import type { Repo, Student, StudentStatus } from '../storage/repo.ts';
-import type { Slot } from '../domain/types.ts';
+import type { BookingInfo, Slot } from '../domain/types.ts';
 import { TextError, msg, type Text } from '../i18n.ts';
 import { expectedCycleMs } from '../config/interval.ts';
-import { checkStudent, newCheckState, reportError, rebookSlot, visitsPerRound, type CheckDeps, type NotifyEvent } from './checker.ts';
+import { checkStudent, newCheckState, reportError, rebookSlot, slotKey, visitsPerRound, type CheckDeps, type NotifyEvent } from './checker.ts';
 
 export interface ServiceDeps {
   repo: Repo;
@@ -42,6 +42,28 @@ export interface Progress {
  */
 export type AcceptResult = 'success' | 'dry_run' | 'gone' | 'not_open' | 'failed' | 'error';
 
+/**
+ * 停在确认页最多保留多久。站点空闲 15 分钟会话失效，留出余量。
+ * 期间浏览器窗口在前面，教练可以直接在里面提交
+ */
+export const HOLD_MS = 10 * 60_000;
+
+/**
+ * 结束保留：rebooked 预约已改成所选考位（教练在浏览器里提交了）；resumed 放弃确认页，继续刷新；
+ * unchanged 教练说提交了但预约没变，继续刷新；changed 预约变成了别的，已暂停请教练核对；
+ * unknown 读不到预约，无法核实，已暂停；not_held 没有在保留
+ */
+export type HoldResult = 'rebooked' | 'resumed' | 'unchanged' | 'changed' | 'unknown' | 'not_held';
+export type HoldEnd = 'abandon' | 'submitted' | 'timeout';
+
+interface Hold {
+  slot: Slot;
+  until: number;
+  cancel: AbortController;
+}
+
+const sameBooking = (a: BookingInfo, b: BookingInfo) => a.centreName.trim().toLowerCase() === b.centreName.trim().toLowerCase() && a.date === b.date && a.time === b.time;
+
 const STARTABLE: StudentStatus[] = ['idle', 'paused', 'stopped', 'pending_confirm', 'running'];
 
 export class Service {
@@ -54,6 +76,8 @@ export class Service {
   private readonly state = newCheckState();
   private readonly abort = new AbortController();
   private readonly phases = new Map<number, Text>();
+  /** 停在确认页、等教练处理的学员 */
+  private readonly holds = new Map<number, Hold>();
   private globalIntervalMs: number;
 
   constructor(deps: ServiceDeps) {
@@ -66,6 +90,11 @@ export class Service {
   startStudent(id: number, resume = false): boolean {
     const s = this.deps.repo.getStudent(id);
     if (!s || !STARTABLE.includes(s.status)) return false;
+    // 停在确认页时点"继续"：先放弃确认页（回到查看预约页），再继续刷新
+    if (this.holds.has(id)) {
+      void this.endHold(id, 'abandon');
+      return true;
+    }
     if (this.scheduler.activeIds().includes(id)) return true;
     const before = { status: s.status, note: s.statusNote };
     this.deps.repo.setStatus(id, 'running', '');
@@ -125,6 +154,7 @@ export class Service {
   pauseStudent(id: number): void {
     const s = this.deps.repo.getStudent(id);
     if (!s || s.status === 'done') return;
+    this.cancelHold(id);
     this.scheduler.stop(id);
     this.deps.repo.setStatus(id, 'paused', msg('status.manual_pause'));
     void this.withLock(id, () => this.dropSession(id));
@@ -157,6 +187,8 @@ export class Service {
    */
   async stopAll(): Promise<void> {
     this.abort.abort();
+    // 停在确认页的学员状态保持"已找到"，浏览器随下面一起关掉
+    for (const id of [...this.holds.keys()]) this.cancelHold(id);
     for (const id of this.scheduler.activeIds()) this.scheduler.stop(id);
     await Promise.allSettled([...this.sessions.keys()].map((id) => this.dropSession(id)));
     let timer: NodeJS.Timeout | undefined;
@@ -179,7 +211,119 @@ export class Service {
     return [...this.phases].filter(([, p]) => typeof p === 'object' && !Array.isArray(p) && p.k === 'phase.confirm').map(([id]) => id);
   }
 
+  /** 停在确认页的学员：所选考位和保留到什么时候 */
+  holdInfo(id: number): { slot: Slot; until: number } | null {
+    const h = this.holds.get(id);
+    return h ? { slot: h.slot, until: h.until } : null;
+  }
+
+  heldIds(): number[] {
+    return [...this.holds.keys()];
+  }
+
+  /** 再把确认页的浏览器窗口调到前面（教练不小心最小化了） */
+  revealHold(id: number): Promise<boolean> {
+    return this.withLock(id, async () => {
+      if (!this.holds.has(id)) return false;
+      await this.sessions.get(id)?.reveal?.().catch(() => {});
+      return true;
+    });
+  }
+
+  /**
+   * 结束保留。不管教练说什么，都重新读取预约来判断结果：
+   * 预约变成所选考位就是改好了（教练在浏览器里提交了），否则放弃确认页继续刷新
+   */
+  endHold(id: number, reason: HoldEnd): Promise<HoldResult> {
+    return this.withLock(id, () => this.doEndHold(id, reason));
+  }
+
   // ---- 内部 ----
+
+  private async startHold(id: number, slot: Slot): Promise<void> {
+    const cancel = new AbortController();
+    this.holds.set(id, { slot, until: this.deps.clock.now() + HOLD_MS, cancel });
+    await this.sessions.get(id)?.reveal?.().catch(() => {});
+    this.deps.clock.sleep(HOLD_MS, cancel.signal).then(
+      () => void this.endHold(id, 'timeout'),
+      () => {},
+    );
+  }
+
+  private cancelHold(id: number): void {
+    const h = this.holds.get(id);
+    if (!h) return;
+    h.cancel.abort();
+    this.holds.delete(id);
+  }
+
+  private async doEndHold(id: number, reason: HoldEnd): Promise<HoldResult> {
+    const { repo, clock } = this.deps;
+    const h = this.holds.get(id);
+    if (!h) return 'not_held';
+    this.cancelHold(id);
+    const student = repo.getStudent(id);
+    if (!student) {
+      await this.dropSession(id);
+      return 'not_held';
+    }
+    const centre = this.deps.centres.get(h.slot.centreId)?.name ?? '';
+    const where = { centre, date: h.slot.date, time: h.slot.time };
+    const session = this.sessions.get(id);
+
+    // 回到查看预约页，读取当前预约（也就离开了确认页）。用 login：能后退就后退，
+    // 教练在浏览器里提交后停在完成页、后退不回去时，重新登录读取
+    let after: BookingInfo | null = null;
+    try {
+      if (session) after = await session.login(student.bookingId, student.surname);
+    } catch {
+      after = null;
+    }
+
+    if (!after) {
+      await this.dropSession(id);
+      if (reason === 'submitted') {
+        // 教练说提交了，却读不到预约：不能当作没改，也不能当作改好了
+        const note = msg('status.hold_unknown', where);
+        repo.setStatus(id, 'paused', note);
+        repo.log(id, 'error', note, clock.now());
+        this.deps.notify({ type: 'error', studentId: id, kind: 'finish_unverified', message: note });
+        return 'unknown';
+      }
+    } else if (sameBooking(after, { centreName: centre, ...h.slot })) {
+      repo.setCurrent(id, after);
+      const to = { centre: after.centreName, date: after.date, time: after.time };
+      repo.setStatus(id, 'done', msg('status.rebooked', to));
+      repo.log(id, 'info', msg('log.rebooked', to), clock.now());
+      this.deps.notify({ type: 'rebooked', studentId: id, to: after });
+      await this.dropSession(id);
+      return 'rebooked';
+    } else if (!sameBooking(after, student.current)) {
+      // 预约变了，但不是所选考位：可能教练在浏览器里选了别的。目标可能要重新设置，先暂停
+      repo.setCurrent(id, after);
+      const note = msg('status.hold_changed', { centre: after.centreName, date: after.date, time: after.time });
+      repo.setStatus(id, 'paused', note);
+      repo.log(id, 'warn', note, clock.now());
+      await this.dropSession(id);
+      return 'changed';
+    } else {
+      await session?.conceal?.().catch(() => {});
+    }
+    // 教练明确放弃的考位，下次再出现不再停下（超时不算，可能只是人不在）
+    if (reason === 'abandon') {
+      const set = this.state.skipped.get(id) ?? new Set<string>();
+      set.add(slotKey(h.slot));
+      this.state.skipped.set(id, set);
+    }
+
+    const logKey = reason === 'timeout' ? 'log.hold_timeout' : reason === 'submitted' ? 'log.hold_unchanged' : 'log.hold_abandon';
+    repo.log(id, reason === 'submitted' ? 'warn' : 'info', msg(logKey, { ...where, min: HOLD_MS / 60_000 }), clock.now());
+    repo.setStatus(id, 'running', '');
+    if (!this.scheduler.start(id)) {
+      repo.setStatus(id, 'paused', msg('status.hold_no_slot'));
+    }
+    return reason === 'submitted' ? 'unchanged' : 'resumed';
+  }
 
   private checkDeps(): CheckDeps {
     const d = this.deps;
@@ -196,6 +340,7 @@ export class Service {
       notify: (e) => d.notify(e),
       state: this.state,
       onPhase: (id, p) => this.phases.set(id, p),
+      onConfirmReady: (id, slot) => this.startHold(id, slot),
     };
   }
 
@@ -219,6 +364,8 @@ export class Service {
         this.scheduler.stop(id);
         await this.dropSession(id);
       }
+      // 停在确认页：不再排队，浏览器留给教练
+      if (outcome === 'hold') this.scheduler.stop(id);
     });
   }
 
@@ -264,6 +411,10 @@ export class Service {
       return 'error';
     }
 
+    if (this.holds.has(student.id)) {
+      this.scheduler.stop(student.id);
+      return 'dry_run';
+    }
     const status = repo.getStudent(student.id)!.status;
     if (status === 'done' || status === 'pending_confirm') {
       this.scheduler.stop(student.id);

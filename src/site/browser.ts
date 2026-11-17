@@ -108,12 +108,14 @@ export async function waitExit(child: ChildProcess, ms: number): Promise<void> {
   await Promise.race([exited, new Promise((r) => setTimeout(r, 2000).unref())]);
 }
 
-async function minimize(page: Page): Promise<void> {
+/** 最小化或恢复浏览器窗口。恢复时同时把页面调到前面。失败不影响使用 */
+export async function setWindowState(page: Page, state: 'minimized' | 'normal'): Promise<void> {
   try {
     const cdp = await page.context().newCDPSession(page);
     const { windowId } = await cdp.send('Browser.getWindowForTarget');
-    await cdp.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'minimized' } });
+    await cdp.send('Browser.setWindowBounds', { windowId, bounds: { windowState: state } });
     await cdp.detach();
+    if (state === 'normal') await page.bringToFront();
   } catch {
     // 不支持就算了
   }
@@ -168,7 +170,7 @@ export async function launchBrowser(profileDir: string, exe: string = realFindBr
   }
   // 窗口最小化：5 个学员就是 5 个窗口，不最小化会挡住教练的屏幕。2026-11-16 实测最小化后登录、选考点、读考位都正常，站点不拦。
   // MYRTA_MINIMIZE=0 时不最小化（排查用）。最小化失败不影响使用
-  if (process.env.MYRTA_MINIMIZE !== '0') await minimize(page);
+  if (process.env.MYRTA_MINIMIZE !== '0') await setWindowState(page, 'minimized');
   return {
     browser,
     page,

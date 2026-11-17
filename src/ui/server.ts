@@ -59,7 +59,7 @@ const MIME: Record<string, string> = {
 };
 
 /** 对外只给 Booking number 的末 3 位，姓氏不返回 */
-export function publicStudent(s: Student, service?: Pick<Service, 'progress' | 'intervalFor' | 'expectedCycle'>, maxDateDays = DEFAULT_TOLERANCE.maxDateDays) {
+export function publicStudent(s: Student, service?: Pick<Service, 'progress' | 'intervalFor' | 'expectedCycle'> & Partial<Pick<Service, 'holdInfo'>>, maxDateDays = DEFAULT_TOLERANCE.maxDateDays) {
   return {
     /** 预计实际多久刷新一次（排队后），学员多、考点多时比设定间隔慢 */
     expectedCycleMs: service && s.target.centreIds.length > 0 ? service.expectedCycle(s.id) : null,
@@ -68,6 +68,8 @@ export function publicStudent(s: Student, service?: Pick<Service, 'progress' | '
     intervalMs: s.intervalMs,
     effectiveIntervalMs: service?.intervalFor(s.id) ?? null,
     progress: service?.progress(s.id) ?? null,
+    /** 停在确认页等教练：所选考位和保留到什么时候 */
+    hold: service?.holdInfo?.(s.id) ?? null,
     /** 最晚能刷新到什么时候，过了就自动停止 */
     deadline: refreshDeadline(s.current, s.target, maxDateDays),
     id: s.id,
@@ -228,6 +230,12 @@ export async function startUiServer(deps: UiDeps, opts: { port?: number; token?:
         deps.service.pauseStudent(id);
       }
       return send(res, 200, publicStudent(deps.repo.getStudent(id)!, deps.service, deps.maxDateDays));
+    }
+    if ((m = /^\/api\/students\/(\d+)\/hold\/(abandon|submitted|reveal)$/.exec(path)) && method === 'POST') {
+      const id = Number(m[1]);
+      if (!deps.repo.getStudent(id)) return send(res, 404, { error: msg('api.no_student') });
+      if (m[2] === 'reveal') return send(res, 200, { result: (await deps.service.revealHold(id)) ? 'ok' : 'not_held' });
+      return send(res, 200, { result: await deps.service.endHold(id, m[2] as 'abandon' | 'submitted') });
     }
     if ((m = /^\/api\/students\/(\d+)$/.exec(path)) && method === 'DELETE') {
       const id = Number(m[1]);

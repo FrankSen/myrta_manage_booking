@@ -16,5 +16,9 @@ export interface SiteSession {
   finish(): Promise<'success' | 'failed' | 'unknown'>;
   /** 重新读取预约详情，用来核实改约结果 */
   readCurrent(): Promise<BookingInfo>;
+  /** 把浏览器窗口恢复并调到前面（停在确认页等教练时用）。不支持时可以不实现 */
+  reveal?(): Promise<void>;
+  /** 把浏览器窗口最小化 */
+  conceal?(): Promise<void>;
   close(): Promise<void>;
 }

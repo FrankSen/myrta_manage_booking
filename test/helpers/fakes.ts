@@ -58,9 +58,17 @@ export class FakeSession implements SiteSession {
     }
     return this.finishResult;
   }
+  readError: Error | null = null;
   async readCurrent(): Promise<BookingInfo> {
     this.calls.push('readCurrent');
+    if (this.readError) throw this.readError;
     return this.current;
+  }
+  async reveal(): Promise<void> {
+    this.calls.push('reveal');
+  }
+  async conceal(): Promise<void> {
+    this.calls.push('conceal');
   }
   async close(): Promise<void> {
     this.closed = true;

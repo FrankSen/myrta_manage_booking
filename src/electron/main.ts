@@ -98,7 +98,7 @@ function openWindow(url: string): void {
   win.webContents.session.setPermissionRequestHandler((_wc, permission, cb) => cb(permission === 'notifications'));
   win.on('close', (e) => {
     if (quitting || !core) return;
-    const q = quitQuestion({ running: core.service.activeIds().length, rebooking: core.service.rebookingIds().length });
+    const q = quitQuestion({ running: core.service.activeIds().length, rebooking: core.service.rebookingIds().length, held: core.service.heldIds().length });
     if (q) {
       const choice = dialog.showMessageBoxSync(win!, {
         type: 'question',

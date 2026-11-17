@@ -23,10 +23,14 @@ export interface CheckState {
   rotation: Map<number, number>;
   /** 连续失败次数（超时或未知错误） */
   failStreak: Map<number, number>;
+  /** 教练在确认页选择放弃的考位（"日期 时间 考点"），之后不再停下 */
+  skipped: Map<number, Set<string>>;
 }
 
+export const slotKey = (s: Slot) => `${s.date} ${s.time} ${s.centreId}`;
+
 export function newCheckState(): CheckState {
-  return { rotation: new Map(), failStreak: new Map() };
+  return { rotation: new Map(), failStreak: new Map(), skipped: new Map() };
 }
 
 export interface CheckDeps {
@@ -45,10 +49,12 @@ export interface CheckDeps {
   state: CheckState;
   /** 报告本轮正在做什么，界面显示用 */
   onPhase?: (studentId: number, phase: Text) => void;
+  /** 自动改约关闭时停在了确认页，浏览器要保留给教练 */
+  onConfirmReady?: (studentId: number, slot: Slot) => Promise<void>;
 }
 
-/** continue：下一轮继续；stop：这个学员不用再排队了 */
-export type CheckOutcome = 'continue' | 'stop';
+/** continue：下一轮继续；stop：这个学员不用再排队了；hold：停在确认页等教练，不再排队，浏览器不关 */
+export type CheckOutcome = 'continue' | 'stop' | 'hold';
 
 const MAX_TRANSIENT_FAILURES = 3;
 
@@ -116,6 +122,7 @@ async function runRound(student: Student, deps: CheckDeps): Promise<CheckOutcome
     const now = clock.now();
     for (const slot of slots) {
       if (isCurrentBooking(slot, current, deps)) continue;
+      if (deps.state.skipped.get(student.id)?.has(slotKey(slot))) continue;
       const r = evaluate(slot, target, tolerance, centres, now);
       if (r.kind === 'exact') exact.push(slot);
       else if (r.kind === 'near') near.push({ slot, notes: r.notes });
@@ -184,7 +191,8 @@ export async function rebookSlot(student: Student, slot: Slot, session: SiteSess
     repo.setStatus(student.id, 'pending_confirm', msg('status.at_confirm', where));
     repo.log(student.id, 'info', msg('log.exact_dry_run', where), clock.now());
     deps.notify({ type: 'dry_run_ready', studentId: student.id, slot });
-    return 'stop';
+    await deps.onConfirmReady?.(student.id, slot);
+    return 'hold';
   }
 
   // 从这里开始，任何异常都意味着"可能已经提交"，不能当作普通失败重试

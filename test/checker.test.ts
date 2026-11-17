@@ -44,7 +44,7 @@ describe('自动改约关闭（默认）', () => {
   test('完全符合：走到确认页，绝不点 Finish', async () => {
     const h = harness({ autoRebook: false });
     h.session.slotsByCentre.set(SILVERWATER, [slot(SILVERWATER, '2026-11-17', '10:30')]);
-    expect(await checkStudent(h.studentId, h.deps)).toBe('stop');
+    expect(await checkStudent(h.studentId, h.deps)).toBe('hold');
     expect(h.session.calls).toContain('reachConfirm:241:2026-11-17:10:30');
     expect(h.session.calls).not.toContain('finish');
     expect(h.repo.getStudent(h.studentId)!.status).toBe('pending_confirm');

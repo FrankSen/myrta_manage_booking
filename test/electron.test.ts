@@ -5,6 +5,7 @@ import { render } from '../src/i18n.ts';
 describe('关窗口确认', () => {
   test('没有在刷新：直接退出', () => expect(quitQuestion({ running: 0, rebooking: 0 })).toBeNull());
   test('有学员在刷新：提示人数', () => expect(render('zh', quitQuestion({ running: 3, rebooking: 0 })!)).toContain('3 个学员'));
+  test('停在确认页：提示会放弃考位', () => expect(render('zh', quitQuestion({ running: 0, rebooking: 0, held: 1 })!)).toContain('停在确认页'));
   test('正在改约：优先提示会中断改约', () => expect(render('zh', quitQuestion({ running: 3, rebooking: 1 })!)).toContain('正在改约'));
 });
 

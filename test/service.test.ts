@@ -2,10 +2,11 @@ import { randomBytes } from 'node:crypto';
 import { describe, expect, test } from 'vitest';
 import { DEFAULT_SETTINGS, type Settings } from '../src/config/settings.ts';
 import type { NotifyEvent } from '../src/engine/checker.ts';
-import { Service } from '../src/engine/service.ts';
+import { HOLD_MS, Service } from '../src/engine/service.ts';
 import { FakeClock } from '../src/scheduler/clock.ts';
 import { openDb } from '../src/storage/db.ts';
 import { Repo } from '../src/storage/repo.ts';
+import { render } from '../src/i18n.ts';
 import { FakeSession, NOW, SILVERWATER, baseTarget, centres, slot } from './helpers/fakes.ts';
 
 const MIN = 60_000;
@@ -197,6 +198,11 @@ describe('教练确认接近的考位', () => {
     expect(t.s.calls).not.toContain('finish');
     expect(t.s.calls.some((c) => c.startsWith('reachConfirm:241:2026-11-17:13:00'))).toBe(true);
     expect(t.repo.getStudent(t.id)!.status).toBe('pending_confirm');
+    // 停在确认页等教练：浏览器不关，窗口调到前面
+    expect(t.s.closed).toBe(false);
+    expect(t.s.calls.at(-1)).toBe('reveal');
+    expect(t.service.holdInfo(t.id)).toMatchObject({ slot: { date: '2026-11-17', time: '13:00' } });
+    await t.service.stopAll();
   });
 
   test('考位已经没了：标记 gone，不改约，学员继续刷新', async () => {
@@ -478,5 +484,174 @@ describe('退出时等浏览器关完', () => {
     release();
     await stopping;
     expect(closed).toBe(true);
+  });
+});
+
+describe('停在确认页等教练（自动改约关闭）', () => {
+  const exact = () => slot(SILVERWATER, '2026-11-17', '10:00');
+
+  /** 第一轮没有考位，第二轮出现完全符合的考位，停在确认页 */
+  async function held() {
+    const t = setup();
+    const id = t.addStudent();
+    t.service.startStudent(id);
+    await t.clock.advance(0);
+    const s = t.sessions.get(id)!;
+    s.slotsByCentre.set(SILVERWATER, [exact()]);
+    await t.clock.advance(2 * MIN);
+    expect(t.repo.getStudent(id)!.status).toBe('pending_confirm');
+    return { ...t, id, s };
+  }
+  const moveTo = (s: FakeSession, x: { date: string; time: string }) => (s.current = { centreName: 'Silverwater Service NSW Centre', date: x.date, time: x.time });
+
+  test('浏览器不关、窗口调到前面，保留 10 分钟；保留期间不再刷新', async () => {
+    const t = await held();
+    expect(t.s.closed).toBe(false);
+    expect(t.s.calls.at(-1)).toBe('reveal');
+    const h = t.service.holdInfo(t.id)!;
+    expect(h.until).toBe(t.clock.now() + HOLD_MS);
+    expect(HOLD_MS).toBe(10 * MIN);
+    expect(t.service.activeIds()).toEqual([]);
+    expect(t.service.heldIds()).toEqual([t.id]);
+    const n = t.s.calls.length;
+    await t.clock.advance(9 * MIN);
+    expect(t.s.calls.length).toBe(n);
+    await t.service.stopAll();
+  });
+
+  test('放弃，继续找：回到查看预约页（核实预约没变）、窗口最小化，用同一个浏览器继续刷新', async () => {
+    const t = await held();
+    expect(await t.service.endHold(t.id, 'abandon')).toBe('resumed');
+    expect(t.s.calls.slice(-2)).toEqual(['login', 'conceal']);
+    expect(t.s.closed).toBe(false);
+    expect(t.service.holdInfo(t.id)).toBeNull();
+    expect(t.repo.getStudent(t.id)!.status).toBe('running');
+    t.s.slotsByCentre.set(SILVERWATER, []);
+    await t.clock.advance(3 * MIN);
+    expect(t.sessions.size).toBe(1);
+    expect(t.s.calls.filter((c) => c === 'login').length).toBeGreaterThanOrEqual(3);
+    await t.service.stopAll();
+  });
+
+  test('教练在浏览器里提交了，点"我已在网站提交"：重新读取核实，标记已改约', async () => {
+    const t = await held();
+    moveTo(t.s, exact());
+    expect(await t.service.endHold(t.id, 'submitted')).toBe('rebooked');
+    const st = t.repo.getStudent(t.id)!;
+    expect(st.status).toBe('done');
+    expect(st.current).toMatchObject({ date: '2026-11-17', time: '10:00' });
+    expect(t.events.find((e) => e.type === 'rebooked')).toBeTruthy();
+    expect(t.s.closed).toBe(true);
+    expect(t.s.calls).not.toContain('finish');
+  });
+
+  test('点了"我已在网站提交"但读不到预约：不当作没改，暂停并报警', async () => {
+    const t = await held();
+    t.s.loginError = new Error('boom');
+    expect(await t.service.endHold(t.id, 'submitted')).toBe('unknown');
+    expect(t.repo.getStudent(t.id)!.status).toBe('paused');
+    expect(t.events.find((e) => e.type === 'error')).toMatchObject({ kind: 'finish_unverified' });
+    expect(t.service.activeIds()).toEqual([]);
+  });
+
+  test('保留期间预约变成了别的考位：暂停，请教练核对', async () => {
+    const t = await held();
+    moveTo(t.s, { date: '2026-11-19', time: '09:00' });
+    expect(await t.service.endHold(t.id, 'abandon')).toBe('changed');
+    const st = t.repo.getStudent(t.id)!;
+    expect(st.status).toBe('paused');
+    expect(st.current).toMatchObject({ date: '2026-11-19' });
+    expect(t.service.activeIds()).toEqual([]);
+  });
+
+  test('点了"我已在网站提交"但预约没变：如实告诉教练，继续刷新', async () => {
+    const t = await held();
+    expect(await t.service.endHold(t.id, 'submitted')).toBe('unchanged');
+    expect(t.repo.getStudent(t.id)!.status).toBe('running');
+    expect(t.repo.recentLogs(50).some((l) => render('zh', l.msg).includes('预约没有变化'))).toBe(true);
+    await t.service.stopAll();
+  });
+
+  test('放弃过的考位，之后再出现也不再停下（其他考位照常）', async () => {
+    const t = await held();
+    expect(await t.service.endHold(t.id, 'abandon')).toBe('resumed');
+    await t.clock.advance(3 * MIN);
+    expect(t.repo.getStudent(t.id)!.status).toBe('running');
+    expect(t.service.holdInfo(t.id)).toBeNull();
+    t.s.slotsByCentre.set(SILVERWATER, [exact(), slot(SILVERWATER, '2026-11-18', '10:00')]);
+    await t.clock.advance(3 * MIN);
+    expect(t.service.holdInfo(t.id)).toMatchObject({ slot: { date: '2026-11-18' } });
+    await t.service.stopAll();
+  });
+
+  test('超过 10 分钟没处理：自动放弃确认页，继续刷新', async () => {
+    const t = await held();
+    t.s.slotsByCentre.set(SILVERWATER, []);
+    await t.clock.advance(HOLD_MS);
+    expect(t.service.holdInfo(t.id)).toBeNull();
+    expect(t.repo.getStudent(t.id)!.status).toBe('running');
+    expect(t.s.calls).toContain('conceal');
+    expect(t.repo.recentLogs(50).some((l) => render('zh', l.msg).includes('10 分钟'))).toBe(true);
+    await t.service.stopAll();
+  });
+
+  test('超时时发现教练已经在浏览器里提交：标记已改约，不再刷新', async () => {
+    const t = await held();
+    moveTo(t.s, exact());
+    await t.clock.advance(HOLD_MS);
+    expect(t.repo.getStudent(t.id)!.status).toBe('done');
+    expect(t.service.activeIds()).toEqual([]);
+  });
+
+  test('回到查看预约页失败：关掉浏览器，仍然继续刷新（下一轮重新登录）', async () => {
+    const t = await held();
+    t.s.loginError = new Error('boom');
+    expect(await t.service.endHold(t.id, 'abandon')).toBe('resumed');
+    expect(t.s.closed).toBe(true);
+    expect(t.repo.getStudent(t.id)!.status).toBe('running');
+    await t.service.stopAll();
+  });
+
+  test('保留期间暂停：关掉浏览器、取消保留，之后到时间也不再动', async () => {
+    const t = await held();
+    t.service.pauseStudent(t.id);
+    await t.clock.advance(0);
+    expect(t.s.closed).toBe(true);
+    expect(t.service.holdInfo(t.id)).toBeNull();
+    await t.clock.advance(HOLD_MS);
+    expect(t.repo.getStudent(t.id)!.status).toBe('paused');
+  });
+
+  test('保留期间"继续"（startStudent）等同放弃确认页', async () => {
+    const t = await held();
+    t.s.slotsByCentre.set(SILVERWATER, []);
+    expect(t.service.startStudent(t.id)).toBe(true);
+    await new Promise((r) => setTimeout(r, 0));
+    await t.clock.advance(0);
+    expect(t.service.holdInfo(t.id)).toBeNull();
+    expect(t.s.calls).toContain('conceal');
+    expect(t.repo.getStudent(t.id)!.status).toBe('running');
+    await t.service.stopAll();
+  });
+
+  test('没有在保留的学员：endHold 返回 not_held', async () => {
+    const t = setup();
+    const id = t.addStudent();
+    expect(await t.service.endHold(id, 'abandon')).toBe('not_held');
+  });
+
+  test('退出：关浏览器、取消保留，状态留在"已找到"', async () => {
+    const t = await held();
+    await t.service.stopAll();
+    expect(t.s.closed).toBe(true);
+    expect(t.service.holdInfo(t.id)).toBeNull();
+    expect(t.repo.getStudent(t.id)!.status).toBe('pending_confirm');
+  });
+
+  test('再次显示浏览器窗口', async () => {
+    const t = await held();
+    expect(await t.service.revealHold(t.id)).toBe(true);
+    expect(t.s.calls.at(-1)).toBe('reveal');
+    await t.service.stopAll();
   });
 });

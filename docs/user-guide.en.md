@@ -111,13 +111,21 @@ Exact match (centre, date and time all within your target):
   The app rebooks, the status becomes "Rebooked" and you get a notification. That student is then finished.
 
   Note: auto-rebook is not enabled in this version (the top bar says "Auto-rebook: off").
-  On an exact match the app goes as far as the site's confirm page without submitting; the status becomes
-  "Found (not submitted)" and it appears under "Needs your attention". Click "Open myrta.com" to rebook
-  yourself, or "Keep looking" to continue.
+  On an exact match the app stops at the site's confirm page without submitting, and:
+  - the student's browser window is restored and brought to the front on the confirm page, with a notification;
+  - the student appears under "Needs your attention" with the slot and a countdown of how long the page is kept.
+  You can then:
+  - check the slot in that browser window, pick the phone number, tick the terms and click Finish, then click
+    "I submitted on the website" in the app. The app re-reads the booking; if it changed, the student is "Rebooked".
+  - click "Show browser window" if the window got hidden or minimised.
+  - click "Skip, keep looking" to drop this slot; the app goes back and keeps refreshing, and won't stop for this slot again.
+  The confirm page is kept for up to 10 minutes (the site times out when idle). After that the app leaves it and
+  keeps refreshing; if you had in fact submitted in the browser, it reads the new booking and marks it "Rebooked".
+  Only this student pauses meanwhile; the others keep refreshing.
 
 Close match (within 1 hour, or a centre within 10 km):
   Never rebooked automatically. It appears under "Needs your attention" with a notification.
-  - "Rebook to this": the app checks the slot again and rebooks if it's still there (with auto-rebook off, it stops at the confirm page).
+  - "Rebook to this": the app checks the slot again and rebooks if it's still there (with auto-rebook off, it stops at the confirm page and waits for you, as above).
   - "Dismiss": ignore it and keep refreshing.
 
 Notifications: if there's an "Enable notifications" button at the top, click it and allow.

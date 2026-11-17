@@ -1,7 +1,7 @@
 import type { Page } from 'playwright-core';
 import { addDays, mondayOf, parseSiteDate, slotCellTime, weekdayKey } from '../domain/time.ts';
 import type { BookingInfo, LocalDate, Slot } from '../domain/types.ts';
-import { launchBrowser, type BrowserHandle } from './browser.ts';
+import { launchBrowser, setWindowState, type BrowserHandle } from './browser.ts';
 import { SiteError } from './errors.ts';
 import { errorText, msg } from '../i18n.ts';
 import { detectPage, hasNoTimeslotsMessage, hasTimeslotsData, parseBookingDetails, parseTimeslots, type PageKind } from './parse.ts';
@@ -159,6 +159,14 @@ export class BrowserSession implements SiteSession {
     const page = await this.page();
     if (!(await this.tryReturnToMain(page))) throw new SiteError('unknown_page', msg('err.no_main'));
     return this.readSummary(page);
+  }
+
+  async reveal(): Promise<void> {
+    if (this.handle) await setWindowState(this.handle.page, 'normal');
+  }
+
+  async conceal(): Promise<void> {
+    if (this.handle && process.env.MYRTA_MINIMIZE !== '0') await setWindowState(this.handle.page, 'minimized');
   }
 
   async close(): Promise<void> {

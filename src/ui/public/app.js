@@ -65,7 +65,16 @@ function renderTodo(list, offers) {
       <div class="actions"><button class="primary" data-act="accept">${tr('btn.accept')}</button><button data-act="dismiss">${tr('btn.dismiss')}</button></div>
     </div>`);
   }
-  for (const s of list.filter((x) => x.status === 'pending_confirm')) {
+  for (const s of list.filter((x) => x.status === 'pending_confirm' && x.hold)) {
+    const h = s.hold;
+    items.push(`<div class="todo-item hold" data-id="${s.id}">
+      <div><span class="tag found">${tr('tag.found')}</span><span class="what">${esc(s.label)}${tr('run.phase_sep')}${esc(centreName(h.slot.centreId))} ${esc(fmtDate(h.slot.date))} ${esc(h.slot.time)}</span>
+        <div class="hint">${esc(tr('todo.hold_hint', { centre: centreName(h.slot.centreId), date: fmtDate(h.slot.date), time: h.slot.time }))}</div>
+        <div class="hint">${tr('todo.hold_left', { t: `<b data-hold="${h.until}">${countdown(h.until - serverNow())}</b>` })}</div></div>
+      <div class="actions">${holdButtons()}</div>
+    </div>`);
+  }
+  for (const s of list.filter((x) => x.status === 'pending_confirm' && !x.hold)) {
     items.push(`<div class="todo-item" data-id="${s.id}">
       <div><span class="tag found">${tr('tag.found')}</span><span class="what">${esc(s.label)}</span>
         <div class="hint">${esc(tr('todo.found_hint', { note: txt(s.statusNote) }))}</div></div>
@@ -83,11 +92,18 @@ function renderTodo(list, offers) {
   $('#todo').innerHTML = items.join('');
 }
 
+function holdButtons() {
+  return `<button class="primary" data-act="hold-submitted">${tr('btn.hold_submitted')}</button>`
+    + `<button data-act="hold-reveal">${tr('btn.hold_reveal')}</button>`
+    + `<button data-act="hold-abandon">${tr('btn.hold_abandon')}</button>`;
+}
+
 function studentActions(s) {
   const b = [];
-  if (s.status === 'running') b.push(`<button data-act="pause">${tr('btn.pause')}</button>`);
+  if (s.hold) b.push(holdButtons());
+  else if (s.status === 'running') b.push(`<button data-act="pause">${tr('btn.pause')}</button>`);
   else if (s.status !== 'done') b.push(`<button class="primary" data-act="start">${tr(s.status === 'idle' ? 'btn.start' : 'btn.resume')}</button>`);
-  if (s.status === 'pending_confirm') b.push(`<button class="warn" data-act="open-site">${tr('btn.open_site')}</button>`);
+  if (s.status === 'pending_confirm' && !s.hold) b.push(`<button class="warn" data-act="open-site">${tr('btn.open_site')}</button>`);
   b.push(`<button data-act="target">${tr('btn.target')}</button>`);
   if (s.status !== 'done') b.push(`<button data-act="interval">${tr('btn.interval')}</button>`);
   b.push(`<button class="danger" data-act="delete">${tr('btn.delete')}</button>`);
@@ -131,12 +147,13 @@ function runLine(s) {
 /** 每秒更新倒计时，不重新拉数据 */
 function tick() {
   for (const el of $$('[data-next]')) el.textContent = countdown(Number(el.dataset.next) - serverNow());
+  for (const el of $$('[data-hold]')) el.textContent = countdown(Number(el.dataset.hold) - serverNow());
   for (const el of $$('[data-meter]')) {
     const rest = Number(el.dataset.meter) - serverNow();
     el.style.width = `${Math.min(100, Math.max(0, 100 - (rest / Number(el.dataset.total)) * 100))}%`;
   }
   // 倒计时走完，下一轮应该开始了，拉一次最新状态
-  if ($$('[data-next]').some((el) => Number(el.dataset.next) - serverNow() < -1500) && !reloading) void reload();
+  if ($$('[data-next],[data-hold]').some((el) => Number(el.dataset.next ?? el.dataset.hold) - serverNow() < -1500) && !reloading) void reload();
 }
 
 function renderStudents(list) {
@@ -218,6 +235,15 @@ document.addEventListener('click', async (ev) => {
     } else {
       const id = holder.dataset.id;
       const s = students.find((x) => String(x.id) === id);
+      if (act === 'hold-reveal') { await api('POST', `/api/students/${id}/hold/reveal`); return; }
+      if (act === 'hold-abandon' || act === 'hold-submitted') {
+        const h = s?.hold;
+        if (act === 'hold-abandon' && h && !confirm(tr('confirm.hold_abandon', { centre: centreName(h.slot.centreId), date: fmtDate(h.slot.date), time: h.slot.time }))) return;
+        for (const b of $$(`[data-id="${id}"] button`)) b.disabled = true;
+        btn.textContent = tr('hold.working');
+        const { result } = await api('POST', `/api/students/${id}/hold/${act === 'hold-abandon' ? 'abandon' : 'submitted'}`);
+        alert(tr(`hold.${result}`));
+      }
       if (act === 'start') await api('POST', `/api/students/${id}/start`);
       if (act === 'pause') await api('POST', `/api/students/${id}/pause`);
       if (act === 'delete' && confirm(tr('confirm.delete', { label: s?.label ?? '' }))) await api('DELETE', `/api/students/${id}`);
