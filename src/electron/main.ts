@@ -6,6 +6,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startApp, type App } from '../app/start.ts';
+import { cleanupOrphans } from '../site/orphans.ts';
 import { BrowserSession } from '../site/flow.ts';
 import { realFindBrowser } from '../site/browser.ts';
 import { DEFAULT_LANG, errorText, render, t, type Lang, type Text } from '../i18n.ts';
@@ -49,6 +50,7 @@ async function boot(): Promise<void> {
       runtimeDir: dataDir,
       centresFile: join(root, 'data', 'nsw-test-centres.json'),
       openSession: async (_id, profileDir) => new BrowserSession({ profileDir, allowFinish: false }),
+      cleanupBrowsers: (root) => cleanupOrphans(root),
       finishAvailable: false,
       requireLicense: true,
       openWindow: () => null,

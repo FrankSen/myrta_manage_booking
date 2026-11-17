@@ -1,6 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import { startApp } from './app/start.ts';
 import { BrowserSession } from './site/flow.ts';
+import { cleanupOrphans } from './site/orphans.ts';
 import { errorText, render } from './i18n.ts';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -14,6 +15,7 @@ try {
     // 每个学员一个固定的浏览器资料目录，保留登录状态；添加学员时的临时读取用 probe 目录。
     // 提交改约（Finish）要等第一次真实改约验证后才打开，见实现计划任务 10
     openSession: async (_id, profileDir) => new BrowserSession({ profileDir, allowFinish: false }),
+    cleanupBrowsers: (root) => cleanupOrphans(root),
     finishAvailable: false,
     requireLicense: process.env.MYRTA_NO_LICENSE !== '1',
   });

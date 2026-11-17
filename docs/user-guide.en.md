@@ -30,6 +30,8 @@ General
 - The app is a normal window; there's no command-line window. Closing the window quits the app.
 - Nothing else (Node etc.) needs to be installed.
 - Only one copy runs per computer. Opening it again brings the existing window to the front.
+- If the app is force-closed (Task Manager, crash, forced shutdown), student browsers may be left running.
+  The app closes them the next time it starts; before upgrading, open and close the app once to clean up.
 - The interface is in Chinese by default. Click "English" at the top right to switch; click "中文" to switch back.
   The choice is remembered. All dates and times are shown in Sydney time, whatever the computer's time zone.
 
@@ -182,7 +184,8 @@ A: Separately from the app, in the system's app data folder:
 
 Q: How do I upgrade? Are students that are refreshing affected?
 A: Students, targets, round counts and the license are in the data folder above; upgrading only replaces the app.
-   1. Close the app (refreshing stops and the browser windows close).
+   1. Close the app (refreshing stops and the browser windows close). If replacing files says a file is open in another
+      program, open and close the app once (it cleans up leftover browsers); if it still fails, close any old-version black command window.
    2. Windows: unzip the new version over the old folder (or replace the folder in the same place; shortcuts keep working).
       Mac: drag the new "MyRTA Rebook.app" into Applications, choose "Replace", and run the xattr command above again.
    3. Open the app. Students that were refreshing continue and keep their round counts.

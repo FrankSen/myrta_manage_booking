@@ -18,6 +18,8 @@ import { runtimePaths } from './paths.ts';
 import { loadSettings, saveCheckInterval, saveLanguage } from './settings-file.ts';
 
 export interface AppOptions {
+  /** 启动时和退出时结束遗留的学员浏览器（上次软件被强行结束时留下的）。正式运行时打开，测试不用 */
+  cleanupBrowsers?: (profileRoot: string) => Promise<number>;
   runtimeDir: string;
   centresFile: string;
   /** 为某个学员打开站点会话；studentId 为 null 表示"添加学员时临时读取一次" */
@@ -86,6 +88,16 @@ export async function startApp(opts: AppOptions): Promise<App> {
     // 上次没来得及认领的目录（程序在添加学员中途退出）
     for (const name of existsSync(paths.browserProfiles) ? readdirSync(paths.browserProfiles) : []) {
       if (name.startsWith('pending-')) rmSync(`${paths.browserProfiles}/${name}`, { recursive: true, force: true });
+    }
+    // 上次被强行结束时留下的学员浏览器：占着资料目录，新开的浏览器会把请求转给它，升级时文件也删不掉
+    if (opts.cleanupBrowsers) {
+      const n = await opts.cleanupBrowsers(paths.browserProfiles);
+      if (n > 0) repo.log(null, 'info', msg('log.orphans_killed', { n }), clock.now());
+      // 退出时再查一遍：正常关闭的浏览器已经没了，这里收拾关闭超时、没关掉的
+      const cleanup = opts.cleanupBrowsers;
+      closers.push(async () => {
+        await cleanup(paths.browserProfiles).catch(() => 0);
+      });
     }
     let probeQueue: Promise<unknown> = Promise.resolve();
     let probeSession: SiteSession | null = null;

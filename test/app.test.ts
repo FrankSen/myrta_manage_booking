@@ -100,6 +100,24 @@ describe('装配', () => {
   });
 });
 
+describe('遗留浏览器清理', () => {
+  test('启动前清理一次（在恢复刷新之前），有清理时写记录；退出时再清理一次', async () => {
+    const d = dir();
+    const calls: string[] = [];
+    let opened = false;
+    app = await startApp({
+      runtimeDir: d, centresFile, openWindow: () => null,
+      openSession: async () => { opened = true; return new FakeSession(); },
+      cleanupBrowsers: async (root) => { calls.push(root); return opened ? 0 : 2; },
+    });
+    expect(calls).toEqual([join(d, 'browser-profile')]);
+    expect(app.repo.recentLogs(5).some((l) => render('zh', l.msg).includes('2 个学员浏览器'))).toBe(true);
+    await app.stop();
+    app = null;
+    expect(calls).toHaveLength(2);
+  });
+});
+
 describe('配置文件', () => {
   test('不存在：用默认值', () => {
     expect(loadSettings(join(dir(), 'nope.json'))).toBe(DEFAULT_SETTINGS);
