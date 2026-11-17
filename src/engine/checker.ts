@@ -35,7 +35,7 @@ export function newCheckState(): CheckState {
 
 export interface CheckDeps {
   repo: Repo;
-  limiter: Pick<Limiter, 'acquire' | 'reportBlocked' | 'reportOk'>;
+  limiter: Pick<Limiter, 'acquire' | 'reportBlocked' | 'reportOk'> & Partial<Pick<Limiter, 'waitBackoff'>>;
   clock: Clock;
   /** 程序退出或学员被暂停时触发，用来中断限速等待 */
   signal?: AbortSignal;
@@ -98,6 +98,11 @@ function preflight(student: Student, current: BookingInfo, deps: CheckDeps): Tex
 async function runRound(student: Student, deps: CheckDeps): Promise<CheckOutcome> {
   const { repo, limiter, clock, tolerance, centres } = deps;
   const phase = (p: Text) => deps.onPhase?.(student.id, p);
+  // 网站刚拦截过：退避结束前连浏览器都不开、不登录。旧做法只在查考点前等，登录照样访问网站，拦截越来越长
+  if (limiter.waitBackoff) {
+    phase(msg('phase.backoff'));
+    await limiter.waitBackoff(deps.signal);
+  }
   phase(msg('phase.open_browser'));
   const session = await deps.getSession(student.id);
 

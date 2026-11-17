@@ -170,8 +170,10 @@ Q: "Chrome or Edge was not found".
 A: Install Google Chrome and open the app again.
 
 Q: "The site is refusing access for now".
-A: The site thinks there are too many visits. The app pauses all students (from 5 minutes up to 1 hour) and
-   resumes by itself. If it keeps happening, refresh fewer students at once.
+A: The site thinks there are too many visits. The app pauses all students (from 5 minutes up to 1 hour); the top of
+   the page shows how long and when it resumes. It doesn't visit the site at all meanwhile and resumes by itself.
+   If it's refused again right after resuming, the next pause doubles. If it keeps happening, refresh fewer students
+   at once or give students who aren't in a hurry a longer interval.
 
 Q: "The site asked for a captcha".
 A: The app doesn't solve captchas; the student pauses. Start again a while later.

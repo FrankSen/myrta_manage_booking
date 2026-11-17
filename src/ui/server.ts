@@ -196,7 +196,7 @@ export async function startUiServer(deps: UiDeps, opts: { port?: number; token?:
       });
     }
     if (method === 'GET' && path === '/api/students') {
-      return send(res, 200, { now: deps.now(), students: deps.repo.listStudents().map((x) => publicStudent(x, deps.service, deps.maxDateDays)) });
+      return send(res, 200, { now: deps.now(), backoffUntil: deps.service.backoffUntil(), students: deps.repo.listStudents().map((x) => publicStudent(x, deps.service, deps.maxDateDays)) });
     }
     if (method === 'POST' && path === '/api/students/cancel-read') {
       deps.cancelFetch?.();

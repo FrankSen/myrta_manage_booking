@@ -16,6 +16,8 @@ interface Entry {
   factor: number;
   /** reschedule 打断等待时为 true：按新间隔重新等，而不是立刻跑 */
   rearm: boolean;
+  /** 第一轮不立刻跑，先等一个间隔 */
+  skipFirst: boolean;
 }
 
 export interface ScheduleInfo {
@@ -47,10 +49,11 @@ export class Scheduler {
     this.intervalFor = intervalFor ?? (() => this.s.checkIntervalMs);
   }
 
-  start(studentId: number): boolean {
+  /** delayFirst：第一轮也要先等一个间隔（刚访问过网站，比如刚放弃确认页） */
+  start(studentId: number, delayFirst = false): boolean {
     if (this.entries.has(studentId)) return true;
     if (this.entries.size >= this.s.maxActiveStudents) return false;
-    const e: Entry = { ac: new AbortController(), running: false, rerun: false, timerAc: null, lastEnd: 0, nextAt: null, factor: 1, rearm: false };
+    const e: Entry = { ac: new AbortController(), running: false, rerun: false, timerAc: null, lastEnd: 0, nextAt: null, factor: 1, rearm: false, skipFirst: delayFirst };
     this.entries.set(studentId, e);
     void this.loop(studentId, e);
     return true;
@@ -95,14 +98,18 @@ export class Scheduler {
 
   private async loop(id: number, e: Entry): Promise<void> {
     while (!e.ac.signal.aborted) {
-      e.running = true;
-      e.nextAt = null;
-      try {
-        await this.run(id);
-      } catch {
-        // 错误由调用方记录；调度器本身不能因为一轮失败而停
+      if (e.skipFirst) {
+        e.skipFirst = false;
+      } else {
+        e.running = true;
+        e.nextAt = null;
+        try {
+          await this.run(id);
+        } catch {
+          // 错误由调用方记录；调度器本身不能因为一轮失败而停
+        }
+        e.running = false;
       }
-      e.running = false;
       e.lastEnd = this.clock.now();
       if (e.ac.signal.aborted) return;
       if (e.rerun) {

@@ -4,6 +4,8 @@ import { DEFAULT_SETTINGS, type Settings } from '../src/config/settings.ts';
 import type { NotifyEvent } from '../src/engine/checker.ts';
 import { HOLD_MS, RELEASE_RECHECK_MS, Service } from '../src/engine/service.ts';
 import { FakeClock } from '../src/scheduler/clock.ts';
+import { Limiter } from '../src/scheduler/limiter.ts';
+import { SiteError } from '../src/site/errors.ts';
 import { openDb } from '../src/storage/db.ts';
 import { Repo } from '../src/storage/repo.ts';
 import { render } from '../src/i18n.ts';
@@ -303,8 +305,6 @@ describe('退出时不被限速等待卡住', () => {
     const { Limiter } = await import('../src/scheduler/limiter.ts');
     const limiter = new Limiter(clock, DEFAULT_SETTINGS.hidden);
     limiter.reportBlocked(); // 5 分钟退避
-    limiter.reportBlocked(); // 10 分钟
-    limiter.reportBlocked(); // 20 分钟
     const sessions: FakeSession[] = [];
     const service = new Service({
       repo, clock, limiter, settings: DEFAULT_SETTINGS, centres,
@@ -316,10 +316,9 @@ describe('退出时不被限速等待卡住', () => {
       current: { centreName: 'Silverwater Service NSW Centre', date: '2026-12-30', time: '11:30' }, target: baseTarget,
     });
     service.startStudent(id);
-    await clock.advance(0); // 登录完成，正在等 20 分钟的退避
-    expect(sessions[0]!.calls).toEqual(['login']);
+    await clock.advance(0); // 正在等 5 分钟的退避，还没开浏览器
+    expect(sessions).toHaveLength(0);
     await service.stopAll(); // 没有 clock.advance，不能卡住
-    expect(sessions[0]!.closed).toBe(true);
     expect(repo.getStudent(id)!.status).toBe('running'); // 被中断不是失败，不改状态
   });
 });
@@ -761,5 +760,85 @@ describe('立即查一次', () => {
   test('没在刷新的学员：返回 false', () => {
     const t = setup();
     expect(t.service.checkNow(t.addStudent())).toBe(false);
+  });
+});
+
+describe('被拦后退避期间不访问网站', () => {
+  test('被拦后 5 分钟内不登录、不开浏览器；到点后才重新访问', async () => {
+    const repo = new Repo(openDb(':memory:'), randomBytes(32));
+    const clock = new FakeClock(NOW);
+    const limiter = new Limiter(clock, DEFAULT_SETTINGS.hidden);
+    const opened: FakeSession[] = [];
+    const service = new Service({
+      repo, clock, limiter, settings: DEFAULT_SETTINGS, centres,
+      openSession: async () => {
+        const s = new FakeSession();
+        // 第一个浏览器登录被拦，之后正常
+        if (opened.length === 0) s.loginError = new SiteError('blocked', 'x');
+        opened.push(s);
+        return s;
+      },
+      notify: () => {},
+      random: () => 0.5,
+    });
+    const id = repo.addStudent({ label: 'S', bookingId: '1234567890', surname: 'T', current: { centreName: 'Silverwater Service NSW Centre', date: '2026-12-30', time: '11:30' }, target: baseTarget });
+    service.startStudent(id);
+    await clock.advance(0);
+    expect(opened).toHaveLength(1);
+    expect(repo.recentLogs(5).some((l) => render('zh', l.msg).includes('退避 5 分钟'))).toBe(true);
+    // 刷新间隔 2 分钟到了，但还在退避：不开浏览器，界面显示在等
+    await clock.advance(3 * MIN);
+    expect(opened).toHaveLength(1);
+    expect(render('zh', service.progress(id)!.phase)).toContain('暂停访问');
+    await clock.advance(2 * MIN);
+    expect(opened).toHaveLength(2);
+    expect(opened[1]!.calls[0]).toBe('login');
+    expect(repo.recentLogs(10).filter((l) => render('zh', l.msg).includes('退避')).length).toBe(1);
+    await service.stopAll();
+  });
+});
+
+describe('放弃确认页后不马上再访问', () => {
+  test('放弃后下一轮按刷新间隔来，不立刻再查', async () => {
+    const t = setup();
+    const id = t.addStudent();
+    t.service.startStudent(id);
+    await t.clock.advance(0);
+    const s = t.sessions.get(id)!;
+    s.slotsByCentre.set(SILVERWATER, [slot(SILVERWATER, '2026-11-17', '10:00')]);
+    await t.clock.advance(2 * MIN);
+    expect(await t.service.endHold(id, 'abandon')).toBe('resumed');
+    const n = s.calls.length;
+    await t.clock.advance(0);
+    expect(s.calls.length).toBe(n);
+    expect(t.service.progress(id)!.nextAt).toBeGreaterThan(t.clock.now() + MIN);
+    await t.clock.advance(3 * MIN);
+    expect(s.calls.length).toBeGreaterThan(n);
+    await t.service.stopAll();
+  });
+});
+
+describe('退避期间放弃确认页', () => {
+  test('不碰网站：直接关浏览器，学员继续排队（等退避结束）', async () => {
+    const repo = new Repo(openDb(':memory:'), randomBytes(32));
+    const clock = new FakeClock(NOW);
+    const limiter = new Limiter(clock, { ...DEFAULT_SETTINGS.hidden, globalMinGapMs: 1 });
+    const sessions: FakeSession[] = [];
+    const service = new Service({
+      repo, clock, limiter, settings: DEFAULT_SETTINGS, centres,
+      openSession: async () => { const s = new FakeSession(); s.slotsByCentre.set(SILVERWATER, [slot(SILVERWATER, '2026-11-17', '10:00')]); sessions.push(s); return s; },
+      notify: () => {}, random: () => 0.5,
+    });
+    const id = repo.addStudent({ label: 'S', bookingId: '1234567890', surname: 'T', current: { centreName: 'Silverwater Service NSW Centre', date: '2026-12-30', time: '11:30' }, target: baseTarget });
+    service.startStudent(id);
+    await clock.advance(0);
+    expect(service.holdInfo(id)).not.toBeNull();
+    limiter.reportBlocked(); // 别的学员被拦
+    const n = sessions[0]!.calls.length;
+    expect(await service.endHold(id, 'abandon')).toBe('resumed');
+    expect(sessions[0]!.calls.length).toBe(n);
+    expect(sessions[0]!.closed).toBe(true);
+    expect(repo.getStudent(id)!.status).toBe('running');
+    await service.stopAll();
   });
 });

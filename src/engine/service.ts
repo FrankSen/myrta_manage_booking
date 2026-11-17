@@ -14,7 +14,7 @@ import { checkStudent, newCheckState, reportError, rebookSlot, slotKey, visitsPe
 export interface ServiceDeps {
   repo: Repo;
   clock: Clock;
-  limiter: Pick<Limiter, 'acquire' | 'reportBlocked' | 'reportOk'>;
+  limiter: Pick<Limiter, 'acquire' | 'reportBlocked' | 'reportOk'> & Partial<Pick<Limiter, 'waitBackoff' | 'backoffUntil'>>;
   settings: Settings;
   centres: CentreIndex;
   /** 为某个学员创建站点会话（打开独立浏览器） */
@@ -214,6 +214,11 @@ export class Service {
     return [...this.phases].filter(([, p]) => typeof p === 'object' && !Array.isArray(p) && p.k === 'phase.confirm').map(([id]) => id);
   }
 
+  /** 全部学员暂停访问网站到什么时候（被拦后退避）；没在退避时为 null */
+  backoffUntil(): number | null {
+    return this.deps.limiter.backoffUntil?.() ?? null;
+  }
+
   /** 立即为这个学员查一轮，不等刷新间隔。没在刷新或停在确认页时返回 false。仍受全局限速 */
   checkNow(id: number): boolean {
     if (!this.scheduler.activeIds().includes(id) || this.holds.has(id)) return false;
@@ -314,9 +319,12 @@ export class Service {
     const session = this.sessions.get(id);
 
     // 回到查看预约页，读取当前预约（也就离开了确认页）。用 login：能后退就后退，
-    // 教练在浏览器里提交后停在完成页、后退不回去时，重新登录读取
+    // 教练在浏览器里提交后停在完成页、后退不回去时，重新登录读取。
+    // 网站正在退避时不碰网站：放弃就直接关浏览器；教练说已提交的，等退避结束再读
     let after: BookingInfo | null = null;
     try {
+      if (session && reason !== 'submitted' && this.deps.limiter.backoffUntil?.()) throw new Error('backoff');
+      if (session) await this.deps.limiter.waitBackoff?.(this.abort.signal);
       if (session) after = await session.login(student.bookingId, student.surname);
     } catch {
       after = null;
@@ -363,7 +371,8 @@ export class Service {
     const logKey = reason === 'timeout' ? 'log.hold_timeout' : reason === 'submitted' ? 'log.hold_unchanged' : 'log.hold_abandon';
     repo.log(id, reason === 'submitted' ? 'warn' : 'info', msg(logKey, { ...where, min: HOLD_MS / 60_000 }), clock.now());
     repo.setStatus(id, 'running', '');
-    if (!this.scheduler.start(id)) {
+    // 刚才回预约页已经访问过网站，下一轮按间隔来，不马上再查
+    if (!this.scheduler.start(id, true)) {
       repo.setStatus(id, 'paused', msg('status.hold_no_slot'));
     }
     return reason === 'submitted' ? 'unchanged' : 'resumed';
@@ -438,6 +447,7 @@ export class Service {
     const { repo, limiter } = this.deps;
     const offer = repo.getOffer(offerId)!;
     try {
+      await limiter.waitBackoff?.(this.abort.signal);
       const session = await this.getSession(student.id);
       repo.setCurrent(student.id, await session.login(student.bookingId, student.surname));
       await limiter.acquire(this.abort.signal);

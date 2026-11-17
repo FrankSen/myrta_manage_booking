@@ -189,7 +189,10 @@ const zh = {
   'stop.locked': '原考试距现在不足 48 小时，预约已锁定，不能再改',
   'stop.target_passed': '目标日期范围已全部进入 48 小时以内，没有可改的日子了',
 
+  'backoff.title': '网站暂时拒绝访问，全部学员暂停访问，还要 {t}（{at} 恢复）',
+  'backoff.hint': '期间软件不会打开网站，到时自动恢复，不用处理。如果经常出现，请减少同时刷新的学员，或把不急的学员刷新间隔调长。',
   'phase.prepare': '准备',
+  'phase.backoff': '网站刚拒绝过访问，暂停访问中',
   'phase.open_browser': '打开浏览器',
   'phase.login': '登录读取预约',
   'phase.queue': '排队等待访问间隔',
@@ -494,7 +497,10 @@ const en = {
   'stop.locked': 'The current test is less than 48 hours away, so the booking is locked',
   'stop.target_passed': 'All target dates are now within 48 hours; there are no days left to move to',
 
+  'backoff.title': 'The website is refusing access; all students pause visits for {t} (until {at})',
+  'backoff.hint': "The app won't open the website meanwhile and resumes by itself. If this happens often, refresh fewer students at once or give students who aren't in a hurry a longer interval.",
   'phase.prepare': 'Preparing',
+  'phase.backoff': 'The website refused access recently; pausing visits',
   'phase.open_browser': 'Opening browser',
   'phase.login': 'Logging in',
   'phase.queue': 'Waiting for its turn',
