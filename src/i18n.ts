@@ -16,6 +16,7 @@ export class TextError extends Error {
 /** 从任意错误里取出要显示的文字 */
 export function errorText(err: unknown): Text {
   if (err instanceof TextError) return err.text;
-  if (err instanceof Error) return err.message;
+  // Playwright 的报错带多行调用记录和终端颜色码，只留第一行
+  if (err instanceof Error) return err.message.replace(/\u001b\[[0-9;]*m/g, '').split('\n')[0]!.trim();
   return String(err);
 }

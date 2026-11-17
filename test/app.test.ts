@@ -118,6 +118,20 @@ describe('遗留浏览器清理', () => {
   });
 });
 
+describe('不再查附近考点后的旧数据', () => {
+  test('启动时把不是目标考点的待确认考位（以前附近考点查到的）标记为忽略', async () => {
+    const d = dir();
+    app = await startApp({ runtimeDir: d, centresFile, openSession: async () => new FakeSession(), openWindow: () => null });
+    const id = app.repo.addStudent({ label: 'A', bookingId: '1234567890', surname: 'T', current: { centreName: SILVERWATER_NAME, date: '2026-12-30', time: '11:30' }, target: { centreIds: [241], dateFrom: '2026-12-01', dateTo: '2026-12-20', timeFrom: '08:00', timeTo: '12:00' } });
+    const near = app.repo.addOffer({ studentId: id, centreId: 112, date: '2026-12-02', time: '09:00', notes: [] }, Date.now())!;
+    const own = app.repo.addOffer({ studentId: id, centreId: 241, date: '2026-12-02', time: '13:00', notes: [] }, Date.now())!;
+    await app.stop();
+    app = await startApp({ runtimeDir: d, centresFile, openSession: async () => new FakeSession(), openWindow: () => null });
+    expect(app.repo.getOffer(near)!.state).toBe('dismissed');
+    expect(app.repo.getOffer(own)!.state).toBe('open');
+  });
+});
+
 describe('配置文件', () => {
   test('不存在：用默认值', () => {
     expect(loadSettings(join(dir(), 'nope.json'))).toBe(DEFAULT_SETTINGS);
@@ -319,12 +333,12 @@ describe('退出时', () => {
 describe('保存刷新间隔', () => {
   test('写回 settings.json，保留文件里原有的其他配置；重启后生效', async () => {
     const p = join(dir(), 's.json');
-    writeFileSync(p, JSON.stringify({ hidden: { maxActiveStudents: 3 }, tolerance: { maxDistanceKm: 8 } }));
+    writeFileSync(p, JSON.stringify({ hidden: { maxActiveStudents: 3 }, tolerance: { maxTimeMinutes: 30 } }));
     saveCheckInterval(p, 5 * 60_000);
     const s = loadSettings(p);
     expect(s.hidden.checkIntervalMs).toBe(5 * 60_000);
     expect(s.hidden.maxActiveStudents).toBe(3);
-    expect(s.tolerance.maxDistanceKm).toBe(8);
+    expect(s.tolerance.maxTimeMinutes).toBe(30);
   });
   test('文件不存在时新建', () => {
     const p = join(dir(), 'sub', 's.json');

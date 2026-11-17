@@ -81,6 +81,8 @@ export class Service {
   private readonly phases = new Map<number, Text>();
   /** 停在确认页、等教练处理的学员 */
   private readonly holds = new Map<number, Hold>();
+  /** 每个学员当前这次操作（一轮检查、确认考位）的中断器。暂停时用它立刻停下 */
+  private readonly ops = new Map<number, AbortController>();
   private globalIntervalMs: number;
 
   constructor(deps: ServiceDeps) {
@@ -117,7 +119,7 @@ export class Service {
   /** 学员一轮要访问站点几次 */
   visits(id: number): number {
     const s = this.deps.repo.getStudent(id);
-    return s ? visitsPerRound(s.target.centreIds, this.deps.settings.tolerance, this.deps.centres) : 0;
+    return s ? visitsPerRound(s.target.centreIds) : 0;
   }
 
   /**
@@ -160,7 +162,9 @@ export class Service {
     this.cancelHold(id);
     this.scheduler.stop(id);
     this.deps.repo.setStatus(id, 'paused', msg('status.manual_pause'));
-    void this.withLock(id, () => this.dropSession(id));
+    // 立刻停下：中断正在进行的这一轮，并马上关浏览器（正在进行的页面操作随之失败结束），不等这一轮跑完
+    this.ops.get(id)?.abort();
+    void this.dropSession(id);
   }
 
   /** 程序重启后，把上次还在运行的学员重新启动 */
@@ -378,14 +382,21 @@ export class Service {
     return reason === 'submitted' ? 'unchanged' : 'resumed';
   }
 
-  private checkDeps(): CheckDeps {
+  /** 开始一次针对学员的操作，返回它的中断信号（退出程序或暂停这个学员时触发） */
+  private beginOp(id: number): AbortSignal {
+    const ac = new AbortController();
+    this.ops.set(id, ac);
+    return AbortSignal.any([this.abort.signal, ac.signal]);
+  }
+
+  private checkDeps(signal: AbortSignal = this.abort.signal): CheckDeps {
     const d = this.deps;
     return {
       repo: d.repo,
       limiter: d.limiter,
       clock: d.clock,
-      signal: this.abort.signal,
-      getSession: (id) => this.getSession(id),
+      signal,
+      getSession: (id) => this.getSession(id, signal),
       dropSession: (id) => this.dropSession(id),
       tolerance: d.settings.tolerance,
       centres: d.centres,
@@ -406,14 +417,16 @@ export class Service {
         return;
       }
       this.phases.set(id, msg('phase.prepare'));
+      const signal = this.beginOp(id);
       let outcome;
       try {
-        outcome = await checkStudent(id, this.checkDeps());
+        outcome = await checkStudent(id, this.checkDeps(signal));
       } finally {
         this.phases.delete(id);
+        this.ops.delete(id);
       }
-      // 只要这一轮跑过（没有因为退出而中断），就算一轮
-      if (!this.abort.signal.aborted && this.deps.repo.getStudent(id)) this.deps.repo.countRound(id, this.deps.clock.now());
+      // 只要这一轮跑过（没有因为退出或暂停而中断），就算一轮
+      if (!signal.aborted && this.deps.repo.getStudent(id)) this.deps.repo.countRound(id, this.deps.clock.now());
       if (outcome === 'stop') {
         this.scheduler.stop(id);
         await this.dropSession(id);
@@ -435,11 +448,13 @@ export class Service {
       return 'gone';
     }
 
-    const deps = this.checkDeps();
+    const signal = this.beginOp(student.id);
+    const deps = this.checkDeps(signal);
     try {
       return await this.acceptChecked(offerId, student, slot, deps);
     } finally {
       this.phases.delete(student.id);
+      this.ops.delete(student.id);
     }
   }
 
@@ -447,10 +462,10 @@ export class Service {
     const { repo, limiter } = this.deps;
     const offer = repo.getOffer(offerId)!;
     try {
-      await limiter.waitBackoff?.(this.abort.signal);
-      const session = await this.getSession(student.id);
+      await limiter.waitBackoff?.(deps.signal);
+      const session = await this.getSession(student.id, deps.signal);
       repo.setCurrent(student.id, await session.login(student.bookingId, student.surname));
-      await limiter.acquire(this.abort.signal);
+      await limiter.acquire(deps.signal);
       const listed = await session.listSlots(offer.centreId, offer.date, offer.date);
       limiter.reportOk();
       if (!listed.some((s) => s.centreId === slot.centreId && s.date === slot.date && s.time === slot.time)) {
@@ -460,7 +475,7 @@ export class Service {
       repo.setOfferState(offerId, 'accepted');
       await rebookSlot(student, slot, session, deps);
     } catch (err) {
-      if (this.abort.signal.aborted) return 'error';
+      if (deps.signal?.aborted) return 'error';
       await reportError(student, err, deps);
       if (repo.getStudent(student.id)!.status !== 'running') this.scheduler.stop(student.id);
       return 'error';
@@ -480,14 +495,14 @@ export class Service {
     return 'failed';
   }
 
-  private async getSession(id: number): Promise<SiteSession> {
-    // 退出过程中不再打开新的浏览器
-    if (this.abort.signal.aborted) throw new TextError(msg('err.exiting'));
+  private async getSession(id: number, signal: AbortSignal = this.abort.signal): Promise<SiteSession> {
+    // 退出或暂停过程中不再打开新的浏览器
+    if (signal.aborted) throw new TextError(msg('err.exiting'));
     let s = this.sessions.get(id);
     if (!s) {
       s = await this.deps.openSession(id);
-      // 浏览器启动要十几秒，期间可能已经开始退出
-      if (this.abort.signal.aborted) {
+      // 浏览器启动要十几秒，期间可能已经开始退出或被暂停
+      if (signal.aborted) {
         await s.close().catch(() => {});
         throw new TextError(msg('err.exiting'));
       }

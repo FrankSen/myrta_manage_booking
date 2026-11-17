@@ -1,10 +1,8 @@
 import { msg, type Text } from '../i18n.ts';
-import { minDistanceKm } from './geo.ts';
 import { LOCK_MS, addDays, diffDays, minutesOf, sydneyInstant } from './time.ts';
 import type { CentreIndex, MatchResult, Slot, Target, Tolerance } from './types.ts';
 
 export const DEFAULT_TOLERANCE: Tolerance = {
-  maxDistanceKm: 10,
   maxTimeMinutes: 60,
   maxDateDays: 0,
 };
@@ -67,11 +65,8 @@ export function evaluate(
   if (timeOut > tolerance.maxTimeMinutes) return NONE;
   if (timeOut > 0) notes.push(msg(byTimes ? 'near.time_times' : 'near.time_range', { n: timeOut }));
 
-  if (!centreIsTarget) {
-    const km = minDistanceKm(slot.centreId, target.centreIds, centres);
-    if (km > tolerance.maxDistanceKm) return NONE;
-    notes.push(msg('near.distance', { km: km.toFixed(1) }));
-  }
+  // 只算目标考点：别的考点再近也不算接近
+  if (!centreIsTarget) return NONE;
 
   return { kind: 'near', notes };
 }

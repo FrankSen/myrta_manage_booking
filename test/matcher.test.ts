@@ -12,7 +12,6 @@ const centres = indexCentres(JSON.parse(readFileSync(new URL('../data/nsw-test-c
 const SILVERWATER = 241;
 const AUBURN = 112; // 2.2 km
 const BANKSTOWN = 20; // 9.7 km
-const ROSELANDS = 421; // 11.8 km
 const ALBURY = 17;
 
 const NOW = sydneyInstant('2026-11-11', '10:00');
@@ -58,18 +57,9 @@ describe('接近', () => {
   test('时间超出 61 分钟 → 不符合', () => {
     expect(run(slot(SILVERWATER, '2026-11-17', '13:01')).kind).toBe('none');
   });
-  test('时间对，考点在 10 公里内', () => {
-    const r = run(slot(BANKSTOWN, '2026-11-17', '10:00'));
-    expect(r.kind).toBe('near');
-    expect(zh(r.notes)[0]).toMatch(/^距目标考点 9\.\d 公里$/);
-  });
-  test('考点超过 10 公里 → 不符合', () => {
-    expect(run(slot(ROSELANDS, '2026-11-17', '10:00')).kind).toBe('none');
-  });
-  test('考点和时间同时有偏差，仍算接近，说明两项', () => {
-    const r = run(slot(AUBURN, '2026-11-17', '08:30'));
-    expect(r.kind).toBe('near');
-    expect(r.notes).toHaveLength(2);
+  test('不是目标考点：再近也不算（不查附近考点）', () => {
+    expect(run(slot(AUBURN, '2026-11-17', '10:00')).kind).toBe('none');
+    expect(run(slot(BANKSTOWN, '2026-11-17', '10:00')).kind).toBe('none');
   });
   test('远处的考点即使时间完全对也不符合', () => {
     expect(run(slot(ALBURY, '2026-11-17', '10:00')).kind).toBe('none');
@@ -87,13 +77,6 @@ describe('日期偏差', () => {
     expect(r.kind).toBe('near');
     expect(zh(r.notes)).toEqual(['日期超出目标范围 1 天']);
     expect(run(slot(SILVERWATER, '2026-11-22', '10:00'), tol).kind).toBe('none');
-  });
-});
-
-describe('容差可调', () => {
-  test('距离放宽到 12 公里后 Roselands 算接近', () => {
-    const tol = { ...DEFAULT_TOLERANCE, maxDistanceKm: 12 };
-    expect(run(slot(ROSELANDS, '2026-11-17', '10:00'), tol).kind).toBe('near');
   });
 });
 

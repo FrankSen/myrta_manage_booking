@@ -395,9 +395,9 @@ describe('预计刷新周期', () => {
   test('一个学员：设定间隔加一轮耗时', () => {
     const t = setup();
     const id = t.addStudent();
-    // Silverwater 10 公里内有别的考点，一轮访问 2 次
-    expect(t.service.visits(id)).toBe(2);
-    expect(t.service.expectedCycle(id)).toBe(2 * MIN + 15_000 + 2 * 35_000);
+    // 只查 1 个目标考点，一轮访问 1 次
+    expect(t.service.visits(id)).toBe(1);
+    expect(t.service.expectedCycle(id)).toBe(2 * MIN + 15_000 + 35_000);
   });
 
   test('5 个学员各 2 个考点：排队时间超过设定间隔', async () => {
@@ -405,8 +405,8 @@ describe('预计刷新周期', () => {
     const ids = ['A', 'B', 'C', 'D', 'E'].map((l) => t.addStudent(l));
     for (const id of ids) t.repo.updateTarget(id, { ...baseTarget, centreIds: [SILVERWATER, 112] });
     for (const id of ids) t.service.startStudent(id);
-    // 每人 3 次（2 个目标 + 1 个附近），共 15 次 × 20 秒 = 5 分钟
-    expect(t.service.expectedCycle(ids[0]!)).toBe(5 * MIN);
+    // 每人 2 次，共 10 次 × 20 秒 = 200 秒；自己这一轮 2 分 + 15 秒 + 2 × 35 秒 = 205 秒，取较大的
+    expect(t.service.expectedCycle(ids[0]!)).toBe(205_000);
     await t.service.stopAll();
   });
 
@@ -415,7 +415,8 @@ describe('预计刷新周期', () => {
     const a = t.addStudent('A');
     const b = t.addStudent('B');
     t.service.startStudent(a);
-    expect(t.service.expectedCycle(b)).toBe(Math.max(MIN + 15_000 + 70_000, 4 * 20_000));
+    // 各 1 个考点：自己一轮 1 分 + 15 秒 + 35 秒；两人共 2 次访问 × 20 秒
+    expect(t.service.expectedCycle(b)).toBe(Math.max(MIN + 15_000 + 35_000, 2 * 20_000));
   });
 });
 
@@ -840,5 +841,50 @@ describe('退避期间放弃确认页', () => {
     expect(sessions[0]!.closed).toBe(true);
     expect(repo.getStudent(id)!.status).toBe('running');
     await service.stopAll();
+  });
+});
+
+describe('暂停时马上停下', () => {
+  test('一轮正在进行时暂停：立刻关浏览器、不等这一轮跑完；不记错误，不算轮数', async () => {
+    const t = setup();
+    const id = t.addStudent();
+    t.service.startStudent(id);
+    await t.clock.advance(0);
+    const s = t.sessions.get(id)!;
+    const rounds = t.repo.getStudent(id)!.rounds;
+    // 下一轮查考点时卡住，直到浏览器被关掉（和真实浏览器一样：关掉后页面操作报错）
+    let entered!: () => void;
+    const inList = new Promise<void>((r) => (entered = r));
+    s.listSlots = () => { entered(); return new Promise((_, rej) => { s.close = async () => { s.closed = true; rej(new Error('locator.click: Target page, context or browser has been closed\nCall log:\n  - waiting')); }; }); };
+    void t.clock.advance(3 * MIN);
+    await inList;
+    t.service.pauseStudent(id);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(s.closed).toBe(true);
+    await t.clock.advance(0);
+    const st = t.repo.getStudent(id)!;
+    expect(st.status).toBe('paused');
+    expect(render('zh', st.statusNote)).toBe('教练手动暂停');
+    expect(st.rounds).toBe(rounds);
+    expect(t.repo.recentLogs(20).filter((l) => l.level !== 'info')).toEqual([]);
+    expect(t.service.progress(id)).toBeNull();
+    await t.service.stopAll();
+  });
+
+  test('教练手动关掉了学员的浏览器：记录说清楚原因（只要第一行），下一轮重新打开', async () => {
+    const t = setup();
+    const id = t.addStudent();
+    t.service.startStudent(id);
+    await t.clock.advance(0);
+    const s = t.sessions.get(id)!;
+    s.listSlots = async () => { throw new Error('locator.click: Target page, context or browser has been closed\nCall log:\n  \u001b[2m- waiting for locator\u001b[22m'); };
+    await t.clock.advance(3 * MIN);
+    const log = t.repo.recentLogs(5).find((l) => l.level === 'warn')!;
+    expect(render('zh', log.msg)).toContain('浏览器窗口被关闭');
+    expect(render('zh', log.msg)).not.toContain('Call log');
+    expect(t.repo.getStudent(id)!.status).toBe('running');
+    await t.clock.advance(3 * MIN);
+    expect(t.sessions.get(id)).not.toBe(s);
+    await t.service.stopAll();
   });
 });

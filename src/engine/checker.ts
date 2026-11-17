@@ -1,6 +1,5 @@
 import type { Clock } from '../scheduler/clock.ts';
 import type { Limiter } from '../scheduler/limiter.ts';
-import { nearbyCentres } from '../domain/geo.ts';
 import { evaluate, refreshDeadline } from '../domain/matcher.ts';
 import { LOCK_MS, addDays, sydneyDateOf, sydneyInstant } from '../domain/time.ts';
 import type { BookingInfo, CentreIndex, LocalDate, Slot, Tolerance } from '../domain/types.ts';
@@ -19,8 +18,6 @@ export type NotifyEvent =
 
 /** 跨轮次保留的内存状态 */
 export interface CheckState {
-  /** 每个学员下一个要查的"附近考点"序号 */
-  rotation: Map<number, number>;
   /** 连续失败次数（超时或未知错误） */
   failStreak: Map<number, number>;
   /** 教练在确认页选择放弃的考位（"日期 时间 考点"），之后不再停下 */
@@ -30,7 +27,7 @@ export interface CheckState {
 export const slotKey = (s: Slot) => `${s.date} ${s.time} ${s.centreId}`;
 
 export function newCheckState(): CheckState {
-  return { rotation: new Map(), failStreak: new Map(), skipped: new Map() };
+  return { failStreak: new Map(), skipped: new Map() };
 }
 
 export interface CheckDeps {
@@ -119,7 +116,7 @@ async function runRound(student: Student, deps: CheckDeps): Promise<CheckOutcome
   const from = maxDate(addDays(target.dateFrom, -tolerance.maxDateDays), earliest);
   const to = addDays(target.dateTo, tolerance.maxDateDays);
 
-  for (const centreId of centresToCheck(student, deps)) {
+  for (const centreId of student.target.centreIds) {
     phase(msg('phase.queue'));
     await limiter.acquire(deps.signal);
     phase(msg('phase.check', { centre: centreText(centreId, centres) }));
@@ -149,22 +146,9 @@ async function runRound(student: Student, deps: CheckDeps): Promise<CheckOutcome
   return 'continue';
 }
 
-/** 一轮要访问站点几次：每个目标考点一次，有附近考点时再加一次 */
-export function visitsPerRound(centreIds: readonly number[], tolerance: Tolerance, centres: CentreIndex): number {
-  if (centreIds.length === 0) return 0;
-  return centreIds.length + (nearbyCentres(centreIds, tolerance.maxDistanceKm, centres).length > 0 ? 1 : 0);
-}
-
-/** 目标考点每轮都查；附近考点每轮轮流查一个 */
-function centresToCheck(student: Student, deps: CheckDeps): number[] {
-  const ids = [...student.target.centreIds];
-  const nearby = nearbyCentres(student.target.centreIds, deps.tolerance.maxDistanceKm, deps.centres);
-  if (nearby.length > 0) {
-    const i = deps.state.rotation.get(student.id) ?? 0;
-    ids.push(nearby[i % nearby.length]!.id);
-    deps.state.rotation.set(student.id, i + 1);
-  }
-  return ids;
+/** 一轮要访问站点几次：每个目标考点一次（不查附近考点，2026-11-17 教练要求去掉，避免误解） */
+export function visitsPerRound(centreIds: readonly number[]): number {
+  return centreIds.length;
 }
 
 function isCurrentBooking(slot: Slot, current: BookingInfo, deps: CheckDeps): boolean {
@@ -251,6 +235,13 @@ export async function reportError(student: Student, err: unknown, deps: CheckDep
   if (kind === 'blocked') {
     const wait = deps.limiter.reportBlocked();
     repo.log(student.id, 'warn', msg('log.blocked_backoff', { kind: kindText('blocked'), min: Math.round(wait / 60_000) }), clock.now());
+    await deps.dropSession(student.id);
+    return 'continue';
+  }
+
+  // 浏览器窗口被关掉了（教练手动关的，或浏览器崩溃）：不是网站的问题，下一轮重新打开
+  if (!(err instanceof SiteError) && /has been closed|Target closed|Browser closed|browser has disconnected/i.test(String((err as Error)?.message ?? err))) {
+    repo.log(student.id, 'warn', msg('log.browser_closed'), clock.now());
     await deps.dropSession(student.id);
     return 'continue';
   }

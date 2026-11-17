@@ -41,7 +41,6 @@ export interface Target {
 
 /** 判断"接近"的容差 */
 export interface Tolerance {
-  maxDistanceKm: number;
   maxTimeMinutes: number;
   maxDateDays: number;
 }

@@ -204,6 +204,12 @@ export async function startApp(opts: AppOptions): Promise<App> {
     const server = ui;
     closers.push(() => server.close());
 
+    // 以前查附近考点时留下的待确认考位：已经不查附近考点了，不再提示
+    for (const o of repo.listOffers()) {
+      if (o.state !== 'open') continue;
+      const s = repo.getStudent(o.studentId);
+      if (s && !s.target.centreIds.includes(o.centreId)) repo.setOfferState(o.id, 'dismissed');
+    }
     service.resumeAll();
 
     const child = opts.openWindow?.(server.url) ?? null;

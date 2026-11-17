@@ -2,7 +2,7 @@ import { render } from '../src/i18n.ts';
 import { describe, expect, test } from 'vitest';
 import { checkStudent } from '../src/engine/checker.ts';
 import { sydneyInstant } from '../src/domain/time.ts';
-import { AUBURN, NOW, SILVERWATER, SILVERWATER_NAME, baseTarget, harness, siteError, slot } from './helpers/fakes.ts';
+import { NOW, SILVERWATER, SILVERWATER_NAME, baseTarget, harness, siteError, slot } from './helpers/fakes.ts';
 
 describe('停止条件', () => {
   test('原考试不足 48 小时：停止，没有访问站点', async () => {
@@ -152,21 +152,11 @@ describe('过滤与待确认', () => {
     expect(h.repo.getStudent(h.studentId)!.status).toBe('running');
   });
 
-  test('附近考点的接近考位也会被发现', async () => {
-    const h = harness();
-    // 轮到的第一个附近考点是 Auburn（2.2 km，最近）
-    h.session.slotsByCentre.set(AUBURN, [slot(AUBURN, '2026-11-17', '10:00')]);
-    await checkStudent(h.studentId, h.deps);
-    expect(h.repo.listOffers()[0]).toMatchObject({ centreId: AUBURN });
-    expect(render('zh', h.repo.listOffers()[0]!.notes[0])).toContain('公里');
-  });
-
-  test('附近考点轮流：每轮查目标考点 + 一个附近考点，依次推进', async () => {
-    const h = harness();
-    for (let i = 0; i < 7; i++) await checkStudent(h.studentId, h.deps);
+  test('只查目标考点，不查附近考点', async () => {
+    const h = harness({ target: { ...baseTarget, centreIds: [SILVERWATER, 17] } });
+    for (let i = 0; i < 3; i++) await checkStudent(h.studentId, h.deps);
     const listed = h.session.calls.filter((c) => c.startsWith('listSlots')).map((c) => Number(c.split(':')[1]));
-    // 每轮：目标考点 241，然后附近考点按距离 112, 601, 521, 621, 96, 20，第 7 轮回到 112
-    expect(listed).toEqual([241, 112, 241, 601, 241, 521, 241, 621, 241, 96, 241, 20, 241, 112]);
+    expect(listed).toEqual([241, 17, 241, 17, 241, 17]);
   });
 
   test('每次 listSlots 之前都先排队等全局限速', async () => {
@@ -174,7 +164,7 @@ describe('过滤与待确认', () => {
     await checkStudent(h.studentId, h.deps);
     const lists = h.session.calls.filter((c) => c.startsWith('listSlots')).length;
     expect(h.acquired).toBe(lists);
-    expect(lists).toBe(2);
+    expect(lists).toBe(1);
   });
 
   test('只查"现在起 48 小时之后"的日期', async () => {

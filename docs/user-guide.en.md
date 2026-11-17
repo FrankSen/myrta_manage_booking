@@ -79,11 +79,13 @@ After adding a student the "Set target" dialog opens. You can change it later wi
 While refreshing, each student has their own browser window that the app operates. It is minimised
 automatically and shows in the taskbar (the Dock on a Mac). Don't close it or click in it. myrta.com blocks invisible "background" browsers, so the window is required.
 
-Up to 5 students can refresh at once. Besides your centres, the app also checks one nearby centre (within 10 km).
+Up to 5 students can refresh at once. The app only checks the centres you chose, never other centres.
+
+Pause: clicking "Pause" closes that student's browser straight away and stops the current round.
 
 With many students or centres, refreshing is slower than the interval you set: all students share one
 internet connection and any two visits to the site are at least 20 seconds apart. For example, 5 students
-with 2 centres each make about 15 visits per round, so a full cycle takes about 5 minutes.
+with 2 centres each make about 10 visits per round, so a full cycle takes about 3 to 4 minutes.
 "About every X min in practice" on each card is that real speed.
 
 Each card shows rounds done, a countdown to the next round, which centre is being checked, and how long the
@@ -125,7 +127,7 @@ Exact match (centre, date and time all within your target):
   keeps refreshing; if you had in fact submitted in the browser, it reads the new booking and marks it "Rebooked".
   Only this student pauses meanwhile; the others keep refreshing.
 
-Close match (within 1 hour, or a centre within 10 km):
+Close match (one of your centres, but within 1 hour of your times):
   Never rebooked automatically. It appears under "Needs your attention" with a notification.
   - "Rebook to this": the app checks the slot again and rebooks if it's still there (with auto-rebook off, it stops at the confirm page and waits for you, as above).
   - "Dismiss": ignore it and keep refreshing.
@@ -191,6 +193,10 @@ A: Nothing is being downloaded. The Chrome used for refreshing writes its own ca
      Windows: %APPDATA%\MyRTA Rebook\browser-profile
      Mac: ~/Library/Application Support/MyRTA Rebook/browser-profile
    Trusting Chrome (chrome.exe) also works. The app keeps these files to a minimum, but can't avoid them entirely.
+
+Q: The log says "The student's browser window was closed".
+A: The student's browser window was closed by hand while refreshing. The app reopens it next round; nothing to do.
+   Minimise it instead of closing it. To stop a student, click "Pause" in the app.
 
 Q: What about sleep or shutdown?
 A: Nothing is refreshed while the computer sleeps or is off. Students that were refreshing continue when you

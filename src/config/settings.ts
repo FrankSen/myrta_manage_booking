@@ -34,7 +34,7 @@ export const DEFAULT_SETTINGS: Settings = {
     backoffBaseMs: 5 * 60_000,
     backoffMaxMs: 60 * 60_000,
   },
-  tolerance: { maxDistanceKm: 10, maxTimeMinutes: 60, maxDateDays: 0 },
+  tolerance: { maxTimeMinutes: 60, maxDateDays: 0 },
   autoRebookEnabled: false,
   language: DEFAULT_LANG,
 };
@@ -68,7 +68,6 @@ export function mergeSettings(base: Settings, override: unknown): Settings {
       backoffMaxMs: num('hidden', h, 'backoffMaxMs', base.hidden.backoffMaxMs),
     },
     tolerance: {
-      maxDistanceKm: num('tolerance', t, 'maxDistanceKm', base.tolerance.maxDistanceKm),
       maxTimeMinutes: num('tolerance', t, 'maxTimeMinutes', base.tolerance.maxTimeMinutes),
       maxDateDays: num('tolerance', t, 'maxDateDays', base.tolerance.maxDateDays),
     },
