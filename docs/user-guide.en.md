@@ -134,6 +134,24 @@ Notifications: if there's an "Enable notifications" button at the top, click it 
 On Windows, check Settings → System → Notifications if none appear.
 
 
+4a. Passing a released slot from one student to another
+-------------------------------------------------------
+
+Student A is moving to another time and student B wants A's current slot. Slots can't be transferred, but when A
+rebooks, A's old slot goes back on the website for anyone to book. The app can make B check the moment it's released:
+
+1. First set B's target to A's current centre, date and time, and start refreshing B. (Do this first.)
+2. Then rebook A:
+   - A is in the app: submit on the confirm page as usual and click "I submitted on the website". Once the app has
+     checked that A's booking changed, it checks for B right away and again 1 minute later. The log says "A's old slot … was released".
+     If you rebook A directly on the website, the app notices on A's next round and does the same.
+   - A is not in the app: after rebooking A on the website, click "Check now" on B's card straight away.
+3. When B finds it, B stops at the confirm page with the browser window in front; submit it.
+
+Note: once released, the slot is visible to everyone on the website, so B getting it isn't guaranteed. A's old slot must be
+more than 48 hours away for B to book it. "Check now" works any time; the minimum gap between site visits still applies.
+
+
 5. When the app stops by itself
 -------------------------------
 

@@ -245,6 +245,18 @@ describe('待确认考位', () => {
   });
 });
 
+describe('立即查一次', () => {
+  test('在刷新：200；没在刷新：409；没有这个学员：404', async () => {
+    const t = await setup();
+    const id = t.repo.addStudent({ label: 'A', bookingId: '1234567890', surname: 'T', current: { centreName: SILVERWATER_NAME, date: '2026-12-30', time: '11:30' }, target: goodTarget });
+    expect((await t.call('POST', `/api/students/${id}/check-now`)).status).toBe(409);
+    await t.call('POST', `/api/students/${id}/start`);
+    expect((await t.call('POST', `/api/students/${id}/check-now`)).status).toBe(200);
+    expect((await t.call('POST', '/api/students/999/check-now')).status).toBe(404);
+    await t.service.stopAll();
+  });
+});
+
 describe('事件推送', () => {
   test('publish 的事件能通过 SSE 收到', async () => {
     const t = await setup();

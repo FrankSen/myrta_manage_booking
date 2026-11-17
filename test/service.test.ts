@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { describe, expect, test } from 'vitest';
 import { DEFAULT_SETTINGS, type Settings } from '../src/config/settings.ts';
 import type { NotifyEvent } from '../src/engine/checker.ts';
-import { HOLD_MS, Service } from '../src/engine/service.ts';
+import { HOLD_MS, RELEASE_RECHECK_MS, Service } from '../src/engine/service.ts';
 import { FakeClock } from '../src/scheduler/clock.ts';
 import { openDb } from '../src/storage/db.ts';
 import { Repo } from '../src/storage/repo.ts';
@@ -653,5 +653,113 @@ describe('停在确认页等教练（自动改约关闭）', () => {
     expect(await t.service.revealHold(t.id)).toBe(true);
     expect(t.s.calls.at(-1)).toBe('reveal');
     await t.service.stopAll();
+  });
+});
+
+describe('原考位放出后，立即为想要它的学员查一次', () => {
+  const A_OLD = { centreName: 'Silverwater Service NSW Centre', date: '2026-12-30', time: '11:30' };
+  const wantOld = { centreIds: [SILVERWATER], dateFrom: '2026-12-30', dateTo: '2026-12-30', timeFrom: '11:30', timeTo: '11:30' };
+  const lists = (s: FakeSession) => s.calls.filter((c) => c.startsWith('listSlots')).length;
+
+  /** A 停在确认页；B 想要 A 的原考位，第一轮已跑完，在等下一轮；C 的目标无关 */
+  async function scene(settings: Partial<Settings> = {}) {
+    const t = setup(settings);
+    const a = t.addStudent('A');
+    const b = t.addStudent('B');
+    const c = t.addStudent('C');
+    t.repo.updateTarget(b, wantOld);
+    for (const id of [b, c, a]) t.service.startStudent(id);
+    await t.clock.advance(0);
+    t.sessions.get(a)!.slotsByCentre.set(SILVERWATER, [slot(SILVERWATER, '2026-11-17', '10:00')]);
+    // A 的下一轮在 2 分钟左右（B、C 的也是），之后大家都在等下一轮
+    await t.clock.advance(3 * MIN);
+    return { ...t, a, b, c, sa: t.sessions.get(a)!, sb: t.sessions.get(b)!, sc: t.sessions.get(c)! };
+  }
+
+  test('教练在浏览器里给 A 提交后核实成功：B 立刻查一次，约 1 分钟后再补查一次；C 不动', async () => {
+    const t = await scene();
+    expect(t.service.holdInfo(t.a)).not.toBeNull();
+    const nb = lists(t.sb), nc = lists(t.sc);
+    t.sa.current = { centreName: A_OLD.centreName, date: '2026-11-17', time: '10:00' };
+    expect(await t.service.endHold(t.a, 'submitted')).toBe('rebooked');
+    await t.clock.advance(0);
+    const v = t.service.visits(t.b);
+    expect(lists(t.sb)).toBe(nb + v);
+    expect(lists(t.sc)).toBe(nc);
+    await t.clock.advance(RELEASE_RECHECK_MS);
+    // C 自己定时的那一轮也在这 1 分钟里，所以 C 只检查没有被"放出"触发
+    expect(lists(t.sb)).toBe(nb + 2 * v);
+    expect(t.repo.recentLogs(30).some((l) => l.studentId === t.c && render('zh', l.msg).includes('原考位'))).toBe(false);
+    expect(t.repo.recentLogs(20).some((l) => l.studentId === t.b && render('zh', l.msg).includes('A 的原考位'))).toBe(true);
+    await t.service.stopAll();
+  });
+
+  test('自动改约成功（Finish 后核实）也会触发', async () => {
+    const t = setup({ autoRebookEnabled: true });
+    const a = t.addStudent('A');
+    const b = t.addStudent('B');
+    t.repo.updateTarget(b, wantOld);
+    t.service.startStudent(b);
+    t.service.startStudent(a);
+    await t.clock.advance(0);
+    const sb = t.sessions.get(b)!;
+    const nb = lists(sb);
+    t.sessions.get(a)!.slotsByCentre.set(SILVERWATER, [slot(SILVERWATER, '2026-11-17', '10:00')]);
+    t.service.checkNow(a);
+    await t.clock.advance(0);
+    expect(t.repo.getStudent(a)!.status).toBe('done');
+    expect(lists(sb)).toBe(nb + t.service.visits(b));
+    await t.service.stopAll();
+  });
+
+  test('A 的预约在软件外被改了（登录时读到的和记录的不同）：同样触发', async () => {
+    const t = setup();
+    const a = t.addStudent('A');
+    const b = t.addStudent('B');
+    t.repo.updateTarget(b, wantOld);
+    t.service.startStudent(b);
+    t.service.startStudent(a);
+    await t.clock.advance(0);
+    const nb = lists(t.sessions.get(b)!);
+    t.sessions.get(a)!.current = { centreName: A_OLD.centreName, date: '2026-11-19', time: '09:00' };
+    await t.clock.advance(5 * MIN);
+    expect(t.repo.getStudent(a)!.current.date).toBe('2026-11-19');
+    // B 自己的定时那一轮也在这 5 分钟里，所以至少多两次
+    expect(lists(t.sessions.get(b)!)).toBeGreaterThanOrEqual(nb + 2 * t.service.visits(b));
+    expect(t.repo.recentLogs(30).some((l) => l.studentId === b && render('zh', l.msg).includes('A 的原考位'))).toBe(true);
+    await t.service.stopAll();
+  });
+
+  test('原考位已进入 48 小时线：不触发', async () => {
+    const t = setup();
+    const a = t.repo.addStudent({ label: 'A', bookingId: '1', surname: 'X', current: { centreName: A_OLD.centreName, date: '2026-11-12', time: '09:00' }, target: baseTarget });
+    const b = t.addStudent('B');
+    t.repo.updateTarget(b, { ...wantOld, dateFrom: '2026-11-12', dateTo: '2026-12-30', timeFrom: '09:00', timeTo: '11:30' });
+    t.service.startStudent(b);
+    await t.clock.advance(0);
+    const nb = lists(t.sessions.get(b)!);
+    expect(t.service.released(a, { centreName: A_OLD.centreName, date: '2026-11-12', time: '09:00' })).toEqual([]);
+    await t.clock.advance(0);
+    expect(lists(t.sessions.get(b)!)).toBe(nb);
+    await t.service.stopAll();
+  });
+});
+
+describe('立即查一次', () => {
+  test('正在刷新的学员：马上跑一轮，不等间隔', async () => {
+    const t = setup();
+    const id = t.addStudent();
+    t.service.startStudent(id);
+    await t.clock.advance(0);
+    const s = t.sessions.get(id)!;
+    const n = s.calls.filter((c) => c.startsWith('listSlots')).length;
+    expect(t.service.checkNow(id)).toBe(true);
+    await t.clock.advance(0);
+    expect(s.calls.filter((c) => c.startsWith('listSlots')).length).toBe(n + t.service.visits(id));
+    await t.service.stopAll();
+  });
+  test('没在刷新的学员：返回 false', () => {
+    const t = setup();
+    expect(t.service.checkNow(t.addStudent())).toBe(false);
   });
 });

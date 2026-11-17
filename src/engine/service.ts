@@ -1,5 +1,5 @@
 import type { Settings } from '../config/settings.ts';
-import { isBookable } from '../domain/matcher.ts';
+import { evaluate, isBookable } from '../domain/matcher.ts';
 import type { CentreIndex } from '../domain/types.ts';
 import type { Clock } from '../scheduler/clock.ts';
 import type { Limiter } from '../scheduler/limiter.ts';
@@ -55,6 +55,9 @@ export const HOLD_MS = 10 * 60_000;
  */
 export type HoldResult = 'rebooked' | 'resumed' | 'unchanged' | 'changed' | 'unknown' | 'not_held';
 export type HoldEnd = 'abandon' | 'submitted' | 'timeout';
+
+/** 原考位放出后，过多久再补查一次（站点放回考位可能有延迟） */
+export const RELEASE_RECHECK_MS = 60_000;
 
 interface Hold {
   slot: Slot;
@@ -211,6 +214,45 @@ export class Service {
     return [...this.phases].filter(([, p]) => typeof p === 'object' && !Array.isArray(p) && p.k === 'phase.confirm').map(([id]) => id);
   }
 
+  /** 立即为这个学员查一轮，不等刷新间隔。没在刷新或停在确认页时返回 false。仍受全局限速 */
+  checkNow(id: number): boolean {
+    if (!this.scheduler.activeIds().includes(id) || this.holds.has(id)) return false;
+    this.scheduler.runNow(id);
+    return true;
+  }
+
+  /**
+   * 学员 fromId 的预约变了，原考位 old 放回了网站：目标正好包含它、正在刷新的其他学员立刻查一次，
+   * 约 1 分钟后再补查一次。返回被触发的学员
+   */
+  released(fromId: number, old: BookingInfo): number[] {
+    const { repo, clock, centres } = this.deps;
+    const name = old.centreName.trim().toLowerCase();
+    const centre = [...centres.values()].find((c) => c.name.trim().toLowerCase() === name);
+    if (!centre) return [];
+    const slot = { centreId: centre.id, date: old.date, time: old.time };
+    if (!isBookable(slot, clock.now())) return [];
+    const who = repo.getStudent(fromId)?.label ?? '';
+    const wants = (id: number) => {
+      const s = id !== fromId && !this.holds.has(id) ? repo.getStudent(id) : undefined;
+      return !!s && s.status === 'running' && evaluate(slot, s.target, this.deps.settings.tolerance, centres, clock.now()).kind === 'exact';
+    };
+    const ids = this.scheduler.activeIds().filter(wants);
+    for (const id of ids) {
+      repo.log(id, 'info', msg('log.released_check', { who, centre: centre.name, date: old.date, time: old.time }), clock.now());
+      this.scheduler.runNow(id);
+    }
+    if (ids.length > 0) {
+      clock.sleep(RELEASE_RECHECK_MS, this.abort.signal).then(
+        () => {
+          for (const id of ids) if (this.scheduler.activeIds().includes(id) && wants(id)) this.scheduler.runNow(id);
+        },
+        () => {},
+      );
+    }
+    return ids;
+  }
+
   /** 停在确认页的学员：所选考位和保留到什么时候 */
   holdInfo(id: number): { slot: Slot; until: number } | null {
     const h = this.holds.get(id);
@@ -296,6 +338,7 @@ export class Service {
       repo.setStatus(id, 'done', msg('status.rebooked', to));
       repo.log(id, 'info', msg('log.rebooked', to), clock.now());
       this.deps.notify({ type: 'rebooked', studentId: id, to: after });
+      this.released(id, student.current);
       await this.dropSession(id);
       return 'rebooked';
     } else if (!sameBooking(after, student.current)) {
@@ -304,6 +347,7 @@ export class Service {
       const note = msg('status.hold_changed', { centre: after.centreName, date: after.date, time: after.time });
       repo.setStatus(id, 'paused', note);
       repo.log(id, 'warn', note, clock.now());
+      this.released(id, student.current);
       await this.dropSession(id);
       return 'changed';
     } else {
@@ -341,6 +385,7 @@ export class Service {
       state: this.state,
       onPhase: (id, p) => this.phases.set(id, p),
       onConfirmReady: (id, slot) => this.startHold(id, slot),
+      onReleased: (id, old) => void this.released(id, old),
     };
   }
 

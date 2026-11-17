@@ -51,6 +51,8 @@ export interface CheckDeps {
   onPhase?: (studentId: number, phase: Text) => void;
   /** 自动改约关闭时停在了确认页，浏览器要保留给教练 */
   onConfirmReady?: (studentId: number, slot: Slot) => Promise<void>;
+  /** 学员的预约变了，原来的考位放回了网站（old 是原预约） */
+  onReleased?: (studentId: number, old: BookingInfo) => void;
 }
 
 /** continue：下一轮继续；stop：这个学员不用再排队了；hold：停在确认页等教练，不再排队，浏览器不关 */
@@ -102,6 +104,8 @@ async function runRound(student: Student, deps: CheckDeps): Promise<CheckOutcome
   phase(msg('phase.login'));
   const current = await session.login(student.bookingId, student.surname);
   repo.setCurrent(student.id, current);
+  // 预约在软件外被改了（教练在网站上改的）：原考位放回了网站
+  if (!sameBooking(current, student.current)) deps.onReleased?.(student.id, student.current);
   const early = preflight(student, current, deps);
   if (early) return stopStudent(student, early, deps);
 
@@ -163,6 +167,10 @@ function isCurrentBooking(slot: Slot, current: BookingInfo, deps: CheckDeps): bo
   return !!c && sameName(c.name, current.centreName) && slot.date === current.date && slot.time === current.time;
 }
 
+function sameBooking(a: BookingInfo, b: BookingInfo): boolean {
+  return sameName(a.centreName, b.centreName) && a.date === b.date && a.time === b.time;
+}
+
 function sameName(a: string, b: string): boolean {
   return a.trim().toLowerCase() === b.trim().toLowerCase();
 }
@@ -212,6 +220,7 @@ export async function rebookSlot(student: Student, slot: Slot, session: SiteSess
     repo.setStatus(student.id, 'done', msg('status.rebooked', to));
     repo.log(student.id, 'info', msg('log.rebooked', to), clock.now());
     deps.notify({ type: 'rebooked', studentId: student.id, to: after });
+    deps.onReleased?.(student.id, student.current);
     await deps.dropSession(student.id);
     return 'stop';
   }

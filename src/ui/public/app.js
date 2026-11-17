@@ -101,7 +101,10 @@ function holdButtons() {
 function studentActions(s) {
   const b = [];
   if (s.hold) b.push(holdButtons());
-  else if (s.status === 'running') b.push(`<button data-act="pause">${tr('btn.pause')}</button>`);
+  else if (s.status === 'running') {
+    b.push(`<button data-act="pause">${tr('btn.pause')}</button>`);
+    if (!s.progress?.running) b.push(`<button data-act="check-now" title="${esc(tr('btn.check_now_title'))}">${tr('btn.check_now')}</button>`);
+  }
   else if (s.status !== 'done') b.push(`<button class="primary" data-act="start">${tr(s.status === 'idle' ? 'btn.start' : 'btn.resume')}</button>`);
   if (s.status === 'pending_confirm' && !s.hold) b.push(`<button class="warn" data-act="open-site">${tr('btn.open_site')}</button>`);
   b.push(`<button data-act="target">${tr('btn.target')}</button>`);
@@ -244,6 +247,7 @@ document.addEventListener('click', async (ev) => {
         const { result } = await api('POST', `/api/students/${id}/hold/${act === 'hold-abandon' ? 'abandon' : 'submitted'}`);
         alert(tr(`hold.${result}`));
       }
+      if (act === 'check-now') await api('POST', `/api/students/${id}/check-now`);
       if (act === 'start') await api('POST', `/api/students/${id}/start`);
       if (act === 'pause') await api('POST', `/api/students/${id}/pause`);
       if (act === 'delete' && confirm(tr('confirm.delete', { label: s?.label ?? '' }))) await api('DELETE', `/api/students/${id}`);

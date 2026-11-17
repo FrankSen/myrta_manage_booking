@@ -231,6 +231,12 @@ export async function startUiServer(deps: UiDeps, opts: { port?: number; token?:
       }
       return send(res, 200, publicStudent(deps.repo.getStudent(id)!, deps.service, deps.maxDateDays));
     }
+    if ((m = /^\/api\/students\/(\d+)\/check-now$/.exec(path)) && method === 'POST') {
+      const id = Number(m[1]);
+      if (!deps.repo.getStudent(id)) return send(res, 404, { error: msg('api.no_student') });
+      if (!deps.service.checkNow(id)) return send(res, 409, { error: msg('api.not_running') });
+      return send(res, 200, publicStudent(deps.repo.getStudent(id)!, deps.service, deps.maxDateDays));
+    }
     if ((m = /^\/api\/students\/(\d+)\/hold\/(abandon|submitted|reveal)$/.exec(path)) && method === 'POST') {
       const id = Number(m[1]);
       if (!deps.repo.getStudent(id)) return send(res, 404, { error: msg('api.no_student') });
