@@ -56,6 +56,9 @@ export interface App {
 }
 
 /** 装配所有模块并启动。任何一步失败都要释放已占用的资源 */
+/** 添加学员时最多愿意排队等多久，超过就直接告诉教练稍后再试 */
+const PROBE_MAX_WAIT_MS = 2 * 60_000;
+
 export async function startApp(opts: AppOptions): Promise<App> {
   const paths = runtimePaths(opts.runtimeDir);
   const release = acquireLock(paths.lock);
@@ -101,6 +104,8 @@ export async function startApp(opts: AppOptions): Promise<App> {
     }
     let probeQueue: Promise<unknown> = Promise.resolve();
     let probeSession: SiteSession | null = null;
+    /** 教练在添加对话框里点了取消：中断正在进行的读取 */
+    let probeCancel: AbortController | null = null;
     const probeAbort = new AbortController();
     // 退出时关掉正在读取的浏览器，否则它会一直等到页面超时
     closers.push(async () => {
@@ -134,9 +139,23 @@ export async function startApp(opts: AppOptions): Promise<App> {
         maxDateDays: settings.tolerance.maxDateDays,
         now: () => clock.now(),
         // 临时读取共用一个 probe 目录，同一目录不能同时开两个浏览器，所以排队执行
+        cancelFetch: () => {
+          probeCancel?.abort();
+          void probeSession?.close().catch(() => {});
+        },
         fetchCurrent: (bookingId, surname): Promise<BookingInfo> => {
+          // 网站刚拦截过、正在整体退避：不要让教练干等十几分钟，直接说明
+          const left = limiter.waitLeft();
+          if (left > PROBE_MAX_WAIT_MS) return Promise.reject(new TextError(msg('err.probe_backoff', { min: Math.ceil(left / 60_000) })));
+          const cancel = new AbortController();
+          probeCancel = cancel;
           const run = probeQueue.then(async () => {
-            await limiter.acquire(probeAbort.signal);
+            const signal = AbortSignal.any([probeAbort.signal, cancel.signal]);
+            try {
+              await limiter.acquire(signal);
+            } catch {
+              throw new TextError(msg(cancel.signal.aborted ? 'err.read_cancelled' : 'err.exiting'));
+            }
             // 每次清空，避免上一个学员的登录状态带到这一个
             rmSync(probeDir, { recursive: true, force: true });
             if (probeAbort.signal.aborted) throw new TextError(msg('err.exiting'));
@@ -144,7 +163,11 @@ export async function startApp(opts: AppOptions): Promise<App> {
             probeSession = session;
             let info: BookingInfo;
             try {
+              if (cancel.signal.aborted) throw new TextError(msg('err.read_cancelled'));
               info = await session.login(bookingId, surname);
+            } catch (err) {
+              if (cancel.signal.aborted) throw new TextError(msg('err.read_cancelled'));
+              throw err;
             } finally {
               probeSession = null;
               await session.close();

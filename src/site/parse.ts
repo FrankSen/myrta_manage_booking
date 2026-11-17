@@ -98,3 +98,31 @@ export function detectPage(text: string, url: string): PageKind {
   }
   return 'unknown';
 }
+
+export type LoginProblem = { kind: 'bad_credentials' | 'widgets_missing'; line: string } | { kind: 'site_message'; line: string };
+
+const BAD_CREDENTIALS =
+  /(cannot|can ?not|can't|could not|couldn't|unable to|we were unable to) (find|locate|retrieve|match)|not (be )?found|no (matching )?booking|incorrect|invalid|do(es)? not match|don't match|not recogni[sz]ed|check (your|the) (details|booking|information)/i;
+
+const lines = (text: string) => text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+
+/**
+ * 点 Continue 之后、还没进入预约页时，看页面上有没有新出现的提示。
+ * before 是点 Continue 之前的页面文字：本来就有的说明文字不算，只看新出现的行。
+ * 返回 null 表示还没看到提示（可能还在加载）
+ */
+export function loginProblem(before: string, after: string): LoginProblem | null {
+  const old = new Set(lines(before));
+  const fresh = lines(after).filter((l) => !old.has(l));
+  const mandatory = fresh.find((l) => /Enter all mandatory fields/i.test(l));
+  if (mandatory) return { kind: 'widgets_missing', line: mandatory };
+  const bad = fresh.find((l) => BAD_CREDENTIALS.test(l));
+  if (bad) return { kind: 'bad_credentials', line: bad.slice(0, 200) };
+  return null;
+}
+
+/** 新出现的文字（去掉本来就有的），用于报错时把网站的原话告诉教练 */
+export function freshText(before: string, after: string, max = 200): string {
+  const old = new Set(lines(before));
+  return lines(after).filter((l) => !old.has(l)).join(' ').slice(0, max);
+}

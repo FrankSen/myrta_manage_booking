@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { detectPage, hasNoTimeslotsMessage, hasTimeslotsData, parseBookingDetails, parseTimeslots } from '../src/site/parse.ts';
+import { detectPage, freshText, hasNoTimeslotsMessage, loginProblem, hasTimeslotsData, parseBookingDetails, parseTimeslots } from '../src/site/parse.ts';
 
 const html = (json: string) => `<html><script>var a = 1;</script><script>
   var timeslots = ${json};
@@ -87,5 +87,32 @@ describe('detectPage', () => {
   test('不认识的页面：unknown，不抛错', () => {
     expect(detectPage('乱七八糟', main)).toBe('unknown');
     expect(detectPage('', '')).toBe('unknown');
+  });
+});
+
+describe('loginProblem：点 Continue 后页面上新出现的提示', () => {
+  const before = 'Manage booking\nBooking number\nFamily name\nMake sure your details are correct and not invalid\nContinue';
+  test('资料不对的各种说法', () => {
+    for (const line of [
+      // 2026-11-17 实测站点原话
+      'The details you have entered are incorrect, please check the details and try again or call the Contact Centre on 13 22 13.',
+      'We cannot find a booking with these details. Please check your details and try again.',
+      'The booking number and family name do not match our records.',
+      'No booking found',
+      'Booking number is invalid',
+      "We couldn't locate your booking",
+    ]) {
+      expect(loginProblem(before, `${before}\n${line}`)).toEqual({ kind: 'bad_credentials', line });
+    }
+  });
+  test('本来就在页面上的说明文字不算', () => {
+    expect(loginProblem(before, before)).toBeNull();
+    expect(loginProblem(before, `${before}\nPlease wait…`)).toBeNull();
+  });
+  test('必填项为空：是控件没初始化，不是资料错', () => {
+    expect(loginProblem(before, `${before}\nEnter all mandatory fields`)).toMatchObject({ kind: 'widgets_missing' });
+  });
+  test('freshText 只给新出现的文字', () => {
+    expect(freshText(before, `${before}\nSomething odd\nhappened`)).toBe('Something odd happened');
   });
 });

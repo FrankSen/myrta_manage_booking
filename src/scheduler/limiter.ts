@@ -26,6 +26,11 @@ export class Limiter {
     else if (signal?.aborted) throw new Error('aborted');
   }
 
+  /** 现在申请的话要等多久（排队加退避） */
+  waitLeft(): number {
+    return Math.max(0, this.nextFree - this.clock.now());
+  }
+
   /** 被拦截：整体退避，返回本次退避时长 */
   reportBlocked(): number {
     const wait = Math.min(this.s.backoffBaseMs * 2 ** this.blockedStreak, this.s.backoffMaxMs);

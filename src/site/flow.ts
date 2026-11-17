@@ -4,7 +4,7 @@ import type { BookingInfo, LocalDate, Slot } from '../domain/types.ts';
 import { launchBrowser, setWindowState, type BrowserHandle } from './browser.ts';
 import { SiteError } from './errors.ts';
 import { errorText, msg } from '../i18n.ts';
-import { detectPage, hasNoTimeslotsMessage, hasTimeslotsData, parseBookingDetails, parseTimeslots, type PageKind } from './parse.ts';
+import { detectPage, freshText, hasNoTimeslotsMessage, loginProblem, hasTimeslotsData, parseBookingDetails, parseTimeslots, type PageKind } from './parse.ts';
 import type { SiteSession } from './session.ts';
 
 const HOME = 'https://www.myrta.com/';
@@ -82,13 +82,9 @@ export class BrowserSession implements SiteSession {
     await page.keyboard.type(surname, { delay: 90 });
     await page.keyboard.press('Tab');
     await page.waitForTimeout(500);
+    const before = await page.innerText('body').catch(() => '');
     await page.locator('#searchBookingCriteria').getByRole('button', { name: /continue/i }).click();
-
-    try {
-      await page.waitForURL(/tbs-change-main/, { timeout: 90_000, waitUntil: 'domcontentloaded' });
-    } catch {
-      throw await this.explainLoginFailure(page);
-    }
+    await this.waitForMain(page, before);
     await page.waitForLoadState('domcontentloaded');
     this.loggedIn = true;
     return this.readSummary(page);
@@ -231,6 +227,32 @@ export class BrowserSession implements SiteSession {
     await page.waitForTimeout(800);
     await this.clickAndLoad(page, '#rms_testGroupWrapper >> role=button[name=/next/i]');
     await this.expectKind(page, 'choose_time');
+  }
+
+  /**
+   * 点 Continue 后等进入"查看预约"页。资料不对时站点留在登录页显示提示，不跳转：
+   * 每秒看一次，看到提示立刻报错，不干等到超时
+   */
+  private async waitForMain(page: Page, before: string): Promise<void> {
+    const start = Date.now();
+    for (;;) {
+      if (/tbs-change-main/.test(page.url())) return;
+      const text = await page.innerText('body').catch(() => '');
+      const kind = detectPage(text, page.url());
+      if (kind === 'blocked') throw new SiteError('blocked', msg('kind.blocked'));
+      if (kind === 'captcha') throw new SiteError('captcha', msg('kind.captcha'));
+      const p = loginProblem(before, text);
+      if (p?.kind === 'widgets_missing') throw new SiteError('widgets_missing', msg('err.mandatory'));
+      if (p?.kind === 'bad_credentials') throw new SiteError('bad_credentials', msg('err.bad_credentials_site', { text: p.line }));
+      const waited = Date.now() - start;
+      // 还在登录页、已经过了 20 秒、页面上出现了新文字：多半是站点的提示，只是说法没见过，把原话告诉教练
+      if (waited > 20_000 && kind === 'login') {
+        const extra = freshText(before, text);
+        if (extra) throw new SiteError('unknown_page', msg('err.login_site_says', { text: extra }));
+      }
+      if (waited > 90_000) throw await this.explainLoginFailure(page);
+      await page.waitForTimeout(1000);
+    }
   }
 
   /** 提交登录后没有进入"查看预约"页，判断是什么原因 */

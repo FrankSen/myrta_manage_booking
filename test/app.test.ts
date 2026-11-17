@@ -148,6 +148,42 @@ describe('添加学员时的临时读取', () => {
       body: JSON.stringify({ label: 'A', bookingId, surname: 'Testsurname' }),
     });
 
+  test('读取中取消：关掉读取用的浏览器，返回"已取消"，不保存学员', async () => {
+    const d = dir();
+    let session: FakeSession | null = null;
+    let started!: () => void;
+    const loginStarted = new Promise<void>((r) => (started = r));
+    app = await startApp({
+      runtimeDir: d, centresFile, openWindow: () => null, settings,
+      openSession: async () => {
+        const s = new FakeSession();
+        // 登录一直不结束，直到浏览器被关掉
+        s.login = () => { started(); return new Promise((_, rej) => { s.close = async () => { s.closed = true; rej(new Error('Target closed')); }; }); };
+        session = s;
+        return s;
+      },
+    });
+    const res = post(app, '1234567890');
+    await loginStarted;
+    await fetch(`http://127.0.0.1:${app.ui.port}/api/students/cancel-read`, { method: 'POST', headers: { 'X-Token': app.ui.token } });
+    const r = await res;
+    expect(r.status).toBe(422);
+    expect(render('zh', (await r.json()).error)).toContain('已取消读取');
+    expect(session!.closed).toBe(true);
+    expect(app.repo.listStudents()).toHaveLength(0);
+  });
+
+  test('网站刚拦截、正在整体退避：不排队干等，直接说明还要等多久', async () => {
+    const d = dir();
+    let opened = 0;
+    app = await startApp({ runtimeDir: d, centresFile, openWindow: () => null, settings, openSession: async () => { opened++; return new FakeSession(); } });
+    (app as unknown as { service: { deps: { limiter: { reportBlocked(): number } } } }).service.deps.limiter.reportBlocked();
+    const r = await post(app, '1234567890');
+    expect(r.status).toBe(422);
+    expect(render('zh', (await r.json()).error)).toContain('还要约 5 分钟');
+    expect(opened).toBe(0);
+  });
+
   test('用 probe 目录，同时添加两个学员时排队，不会同时开两个浏览器；每次清空上一次的登录状态', async () => {
     const d = dir();
     let open = 0;

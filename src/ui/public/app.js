@@ -261,23 +261,27 @@ document.addEventListener('click', async (ev) => {
 // ---------- 添加学员 ----------
 
 $('#btn-add').onclick = () => { $('#form-add').reset(); $('#add-error').textContent = ''; $('#add-progress').hidden = true; $('#dlg-add').showModal(); };
+let addReading = false;
 $('#form-add').addEventListener('submit', async (ev) => {
   if (ev.submitter?.value !== 'ok') return;
   ev.preventDefault();
   const f = new FormData(ev.target);
   const submit = $('#add-submit');
-  submit.disabled = true; $('#add-cancel').disabled = true; submit.textContent = tr('add.reading');
+  submit.disabled = true; submit.textContent = tr('add.reading');
   $('#add-progress').hidden = false; $('#add-error').textContent = '';
+  addReading = true;
   try {
-    const s = await api('POST', '/api/students', { label: f.get('label'), bookingId: f.get('bookingId'), surname: f.get('surname') });
+    const s = await api('POST', '/api/students', { label: f.get('label'), bookingId: f.get('bookingId'), surname: f.get('surname') }).finally(() => { addReading = false; });
     $('#dlg-add').close();
     await reload();
     openTarget(s, true);
   } catch (e) { $('#add-error').textContent = e.message; }
-  finally { submit.disabled = false; $('#add-cancel').disabled = false; submit.textContent = tr('add.submit'); $('#add-progress').hidden = true; }
+  finally { submit.disabled = false; submit.textContent = tr('add.submit'); $('#add-progress').hidden = true; }
 });
-// 读取中不能用 Esc 关掉对话框，否则看不到结果
-$('#dlg-add').addEventListener('cancel', (ev) => { if ($('#add-submit').disabled) ev.preventDefault(); });
+// 读取中点"取消"或按 Esc：中断读取（关掉读取用的浏览器），关闭对话框
+$('#dlg-add').addEventListener('close', () => {
+  if (addReading) void api('POST', '/api/students/cancel-read').catch(() => {});
+});
 
 // ---------- 设置目标 ----------
 

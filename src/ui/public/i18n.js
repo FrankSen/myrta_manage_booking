@@ -175,6 +175,10 @@ const zh = {
 
   'kind.blocked': '站点暂时拒绝访问',
   'kind.bad_credentials': 'Booking number 或姓氏不正确',
+  'err.bad_credentials_site': 'Booking number 或姓氏不正确，网站提示：{text}',
+  'err.login_site_says': '没有进入预约页，网站提示：{text}',
+  'err.probe_backoff': '网站刚拒绝过访问，软件正在暂停访问，还要约 {min} 分钟。请稍后再添加学员',
+  'err.read_cancelled': '已取消读取',
   'kind.widgets_missing': '登录页没有正常加载',
   'kind.unknown_page': '页面不是预期的样子',
   'kind.captcha': '站点要求验证码',
@@ -476,6 +480,10 @@ const en = {
 
   'kind.blocked': 'The site is refusing access for now',
   'kind.bad_credentials': 'The booking number or surname is wrong',
+  'err.bad_credentials_site': 'The booking number or surname is wrong. The website says: {text}',
+  'err.login_site_says': "Didn't get to the booking page. The website says: {text}",
+  'err.probe_backoff': 'The website refused access recently, so the app is pausing visits for about {min} more minute(s). Please add the student later',
+  'err.read_cancelled': 'Reading cancelled',
   'kind.widgets_missing': "The login page didn't load properly",
   'kind.unknown_page': "The page wasn't what we expected",
   'kind.captcha': 'The site asked for a captcha',

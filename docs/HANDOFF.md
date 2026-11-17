@@ -97,6 +97,12 @@
 - `Service.released(fromId, old)`：A 的预约变了（自动改约核实成功、"我已在网站提交"核实成功、保留期间预约变了、或登录时读到预约在软件外被改），对目标完全包含这个考位、正在刷新的其他学员 `runNow`，`RELEASE_RECHECK_MS`（1 分钟）后再补一次。原考位在 48 小时内不触发。仍受全局限速。
 - `Service.checkNow(id)` + `POST /api/students/:id/check-now` + 卡片"立即查一次"按钮：A 不在软件里时教练手动触发。
 
+## 2026-11-17 资料错误时不再卡住
+
+- 原因：资料不对时站点留在登录页显示"The details you have entered are incorrect, please check the details and try again or call the Contact Centre on 13 22 13."，不跳转；旧代码等 URL 跳转 90 秒，旧正则也认不出这句。
+- 现在 `waitForMain` 每秒看一次页面新出现的文字（`loginProblem`，和点 Continue 前对比），认出来立刻报 `bad_credentials`，带网站原话；在登录页 20 秒后有没见过的新文字也直接报出原话。实测点 Continue 后 2 秒报错。
+- 添加学员：读取中可以点"取消"（关掉读取用的浏览器）；网站正在整体退避超过 2 分钟时直接提示稍后再加，不排队干等。
+
 ## 下一步（按顺序）
 
 1. **在真实 Windows 上走一遍**：解压 zip，双击 `MyRTA Rebook.exe`，看 SmartScreen 提示、快捷方式、中文显示（英文 Windows 也要看）、能找到 Chrome/Edge、添加学员能读到预约、关窗口后浏览器都关了、iOA 弹窗是否减少。

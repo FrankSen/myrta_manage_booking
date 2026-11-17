@@ -23,6 +23,8 @@ export interface UiDeps {
   fetchCurrent(bookingId: string, surname: string): Promise<BookingInfo>;
   /** 学员建好后，把刚才读取用的浏览器资料目录交给这个学员继续用 */
   adoptProfile?: (studentId: number, bookingId: string) => void;
+  /** 中断添加学员时正在进行的读取 */
+  cancelFetch?: () => void;
   autoRebookEnabled: boolean;
   /** 日期容差，算"还能刷新到什么时候"用，和引擎一致 */
   maxDateDays?: number;
@@ -195,6 +197,10 @@ export async function startUiServer(deps: UiDeps, opts: { port?: number; token?:
     }
     if (method === 'GET' && path === '/api/students') {
       return send(res, 200, { now: deps.now(), students: deps.repo.listStudents().map((x) => publicStudent(x, deps.service, deps.maxDateDays)) });
+    }
+    if (method === 'POST' && path === '/api/students/cancel-read') {
+      deps.cancelFetch?.();
+      return send(res, 200, { ok: true });
     }
     if (method === 'POST' && path === '/api/students') {
       const input = parseNewStudent(await readJson(req));
