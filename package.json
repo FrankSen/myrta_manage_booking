@@ -10,14 +10,20 @@
     "test": "vitest run",
     "typecheck": "tsc -p .",
     "start": "node src/main.ts",
-    "smoke": "node scripts/smoke.ts"
+    "smoke": "node scripts/smoke.ts",
+    "app": "node scripts/electron-bin.ts && electron .",
+    "test:electron": "ELECTRON_RUN_AS_NODE=1 electron node_modules/vitest/vitest.mjs run"
   },
   "devDependencies": {
     "@types/node": "^24.19.2",
+    "electron": "38.7.2",
+    "resedit": "2.0.3",
     "typescript": "^7.0.2",
     "vitest": "^5.1.0"
   },
   "dependencies": {
     "playwright-core": "1.65.0"
-  }
+  },
+  "main": "src/electron/main.ts",
+  "productName": "MyRTA Rebook"
 }

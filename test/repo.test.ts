@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { randomBytes } from 'node:crypto';
-import { openDb } from '../src/storage/db.ts';
+import { DatabaseSync } from 'node:sqlite';
+import { migrate, openDb } from '../src/storage/db.ts';
 import { Repo } from '../src/storage/repo.ts';
 import type { Target } from '../src/domain/types.ts';
 
@@ -121,5 +122,49 @@ describe('日志', () => {
     repo.log(null, 'warn', 'two', 2);
     repo.log(null, 'error', 'three', 3);
     expect(repo.recentLogs(2).map((l) => l.msg)).toEqual(['three', 'two']);
+  });
+});
+
+describe('刷新轮数与单独间隔', () => {
+  const mk2 = () => {
+    const repo = new Repo(openDb(':memory:'), randomBytes(32));
+    const id = repo.addStudent({
+      label: 'A', bookingId: '1234567890', surname: 'Testsurname',
+      current: { centreName: 'X', date: '2026-12-30', time: '11:30' },
+      target: { centreIds: [241], dateFrom: '2026-12-01', dateTo: '2026-12-10', timeFrom: '09:00', timeTo: '12:00' },
+    });
+    return { repo, id };
+  };
+  test('新学员：0 轮，没有单独间隔', () => {
+    const { repo, id } = mk2();
+    const s = repo.getStudent(id)!;
+    expect(s.rounds).toBe(0);
+    expect(s.intervalMs).toBeNull();
+    expect(s.lastRoundAt).toBeNull();
+  });
+  test('每完成一轮加 1 并记下时间；清零', () => {
+    const { repo, id } = mk2();
+    repo.countRound(id, 1000);
+    repo.countRound(id, 2000);
+    expect(repo.getStudent(id)!).toMatchObject({ rounds: 2, lastRoundAt: 2000 });
+    repo.resetRounds(id);
+    expect(repo.getStudent(id)!).toMatchObject({ rounds: 0, lastRoundAt: null });
+  });
+  test('单独间隔：设置与取消', () => {
+    const { repo, id } = mk2();
+    repo.setInterval(id, 5 * 60_000);
+    expect(repo.getStudent(id)!.intervalMs).toBe(5 * 60_000);
+    repo.setInterval(id, null);
+    expect(repo.getStudent(id)!.intervalMs).toBeNull();
+  });
+  test('旧数据库（没有新列）打开后自动补列，数据不丢', () => {
+    const db = new DatabaseSync(':memory:');
+    db.exec(`CREATE TABLE students (id INTEGER PRIMARY KEY AUTOINCREMENT, label TEXT NOT NULL, booking_id_enc TEXT NOT NULL,
+      surname_enc TEXT NOT NULL, current_json TEXT NOT NULL, target_json TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'idle', status_note TEXT NOT NULL DEFAULT '')`);
+    db.exec(`INSERT INTO students (label, booking_id_enc, surname_enc, current_json, target_json) VALUES ('old', 'x', 'y', '{}', '{}')`);
+    migrate(db);
+    const row = db.prepare('SELECT label, rounds, interval_ms FROM students').get() as Record<string, unknown>;
+    expect(row).toEqual({ label: 'old', rounds: 0, interval_ms: null });
+    migrate(db); // 再跑一次不报错
   });
 });

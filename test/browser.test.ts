@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest';
-import { findBrowser, launchArgs, launchEnv, languageOk } from '../src/site/browser.ts';
+import { spawn } from 'node:child_process';
+import { findBrowser, launchArgs, launchEnv, languageOk, waitExit } from '../src/site/browser.ts';
 
 describe('findBrowser', () => {
   const only = (...paths: string[]) => (p: string) => paths.includes(p);
@@ -40,6 +41,19 @@ describe('启动参数', () => {
     expect(a).toContain('--user-data-dir=/tmp/p');
     expect(a).toContain('--no-first-run');
   });
+  test('关掉浏览器后台下载（组件更新、模型、同步）', () => {
+    const a = launchArgs(9333, '/tmp/p');
+    expect(a).toContain('--disable-component-update');
+    expect(a).toContain('--disable-background-networking');
+    expect(a.find((x) => x.startsWith('--disable-features='))).toContain('OptimizationGuideModelDownloading');
+    expect(a.at(-1)).toBe('about:blank');
+  });
+  test('不加会改变网页可见特征的参数', () => {
+    const a = launchArgs(9333, '/tmp/p');
+    for (const bad of ['--disable-extensions', '--headless', '--enable-automation', '--disable-blink-features']) {
+      expect(a.some((x) => x.startsWith(bad))).toBe(false);
+    }
+  });
   test('只监听本机，不开放调试端口给局域网', () => {
     expect(launchArgs(9333, '/tmp/p')).toContain('--remote-debugging-address=127.0.0.1');
   });
@@ -54,5 +68,20 @@ describe('languageOk', () => {
   test('中文不行', () => {
     expect(languageOk(['zh-CN', 'zh'])).toBe(false);
     expect(languageOk([])).toBe(false);
+  });
+});
+
+describe('waitExit', () => {
+  test('进程正常退出：立即返回', async () => {
+    const child = spawn(process.execPath, ['-e', 'setTimeout(()=>{},50)']);
+    await waitExit(child, 5000);
+    expect(child.exitCode).toBe(0);
+  });
+  test('进程不退出：超时后强制结束', async () => {
+    const child = spawn(process.execPath, ['-e', 'process.on("SIGTERM",()=>{});setInterval(()=>{},1000)']);
+    const t = Date.now();
+    await waitExit(child, 300);
+    expect(child.signalCode).toBe('SIGKILL');
+    expect(Date.now() - t).toBeLessThan(3000);
   });
 });

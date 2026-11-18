@@ -2,57 +2,138 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<title>驾考改约助手</title>
+<title data-i18n="app.title">驾考改约助手</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="/logo.svg">
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-<header>
-  <h1>驾考改约助手</h1>
-  <span id="mode" class="badge"></span>
-  <button id="btn-notify" hidden>开启桌面通知</button>
+<!-- 带 data-i18n 的元素由 app.js 按当前语言填文字；data-i18n-html 允许翻译里有 <br>；data-i18n-ph / data-i18n-title 翻译属性 -->
+<header class="topbar">
+  <img src="/logo.svg" alt="" class="logo">
+  <div class="brand">
+    <h1 data-i18n="app.title"></h1>
+    <div class="sub" data-i18n="app.subtitle"></div>
+  </div>
+  <button id="btn-interval" class="sign-btn" data-i18n-title="top.interval_title">⏱ <span id="interval-label"></span></button>
+  <div class="sign" id="mode"></div>
+  <button id="btn-notify" class="ghost" hidden data-i18n="notify.enable"></button>
+  <div class="license-tag" id="license-tag" hidden></div>
+  <button id="btn-lang" class="ghost small" data-i18n="lang.other" data-i18n-title="lang.other_title"></button>
 </header>
+<div class="road"></div>
+
 <main>
-  <section id="offers-box" hidden>
-    <h2>待你确认的考位</h2>
-    <div id="offers"></div>
+  <section id="license-box" class="panel license" hidden>
+    <h2><span class="dot red"></span><span id="license-msg"></span></h2>
+    <p class="hint" data-i18n="license.hint"></p>
+    <label class="file-btn primary"><span data-i18n="license.import"></span><input type="file" id="license-file" accept=".json,application/json" hidden></label>
+    <p class="error" id="license-error"></p>
   </section>
-  <section>
-    <div class="row"><h2>学员</h2><button id="btn-add">添加学员</button></div>
+
+  <section id="backoff-box" class="panel backoff" hidden>
+    <h2><span class="dot amber"></span><span id="backoff-msg"></span></h2>
+    <p class="hint" data-i18n="backoff.hint"></p>
+  </section>
+
+  <section class="stats" id="stats"></section>
+
+  <section id="todo-box" class="panel todo" hidden>
+    <h2><span class="dot amber"></span><span data-i18n="todo.title"></span></h2>
+    <div id="todo"></div>
+  </section>
+
+  <section class="panel">
+    <div class="row">
+      <h2 data-i18n="students.title"></h2>
+      <button id="btn-add" class="primary" data-i18n="btn.add"></button>
+    </div>
     <div id="students"></div>
   </section>
-  <section>
-    <h2>运行记录</h2>
+
+  <section class="panel">
+    <div class="row">
+      <h2 data-i18n="logs.title"></h2>
+      <div class="row tight">
+        <select id="log-student"></select>
+        <label class="check"><input type="checkbox" id="log-problems"> <span data-i18n="logs.problems"></span></label>
+        <button id="log-toggle" class="ghost small"></button>
+      </div>
+    </div>
     <div id="logs" class="logs"></div>
   </section>
 </main>
 
 <dialog id="dlg-add">
   <form method="dialog" id="form-add">
-    <h3>添加学员</h3>
-    <label>备注名（给自己看，不用写全名）<input name="label" required></label>
-    <label>Booking number<input name="bookingId" inputmode="numeric" required></label>
-    <label>姓氏（与预约一致）<input name="surname" required></label>
-    <p class="hint">添加时会登录一次，读取当前预约。大约需要半分钟。</p>
+    <h3 data-i18n="add.title"></h3>
+    <label><span data-i18n="add.label"></span><span class="hint" data-i18n="add.label_hint"></span><input name="label" required autocomplete="off"></label>
+    <label><span data-i18n="add.booking"></span><input name="bookingId" inputmode="numeric" required autocomplete="off"></label>
+    <label><span data-i18n="add.surname"></span><span class="hint" data-i18n="add.surname_hint"></span><input name="surname" required autocomplete="off"></label>
+    <div class="progress" id="add-progress" hidden>
+      <div class="bar"><span></span></div>
+      <p data-i18n-html="add.progress"></p>
+    </div>
     <p class="error" id="add-error"></p>
-    <div class="row"><button value="cancel" formnovalidate>取消</button><button id="add-submit" value="ok">添加</button></div>
+    <div class="row end"><button value="cancel" formnovalidate id="add-cancel" data-i18n="btn.cancel"></button><button id="add-submit" value="ok" class="primary" data-i18n="add.submit"></button></div>
   </form>
 </dialog>
 
-<dialog id="dlg-target">
-  <form method="dialog" id="form-target">
-    <h3 id="target-title">设置目标</h3>
-    <label>目标考点（可多选，按住 Ctrl 或 Shift 选）<select name="centreIds" multiple size="10" id="centre-select"></select></label>
-    <div class="grid2">
-      <label>最早日期<input type="date" name="dateFrom" required></label>
-      <label>最晚日期<input type="date" name="dateTo" required></label>
-      <label>最早时间<input type="time" name="timeFrom" required></label>
-      <label>最晚时间<input type="time" name="timeTo" required></label>
-    </div>
-    <p class="error" id="target-error"></p>
-    <div class="row"><button value="cancel" formnovalidate>取消</button><button id="target-submit" value="ok">保存</button></div>
+<dialog id="dlg-interval" class="wide">
+  <form method="dialog" id="form-interval">
+    <h3 id="interval-title"></h3>
+    <p class="hint" id="interval-scope"></p>
+    <div class="interval-choices" id="interval-choices"></div>
+    <p class="interval-est" id="interval-est"></p>
+    <details class="explain" open>
+      <summary data-i18n="interval.why"></summary>
+      <div id="interval-help"></div>
+    </details>
+    <p class="error" id="interval-error"></p>
+    <div class="row end"><button value="cancel" formnovalidate data-i18n="btn.cancel"></button><button id="interval-submit" value="ok" class="primary" data-i18n="btn.save"></button></div>
   </form>
 </dialog>
-<script src="/app.js"></script>
+
+<dialog id="dlg-target" class="wide">
+  <form method="dialog" id="form-target">
+    <h3 id="target-title"></h3>
+    <p class="hint" id="target-current"></p>
+
+    <fieldset>
+      <legend><span data-i18n="target.centres"></span> <span class="hint" id="centre-count"></span></legend>
+      <input type="search" id="centre-search" data-i18n-ph="target.search_ph">
+      <div id="centre-chosen" class="chips"></div>
+      <div id="centre-list" class="centre-list"></div>
+    </fieldset>
+
+    <fieldset>
+      <legend data-i18n="target.date"></legend>
+      <div class="grid2">
+        <label><span data-i18n="target.date_from"></span><input type="date" name="dateFrom" required></label>
+        <label><span data-i18n="target.date_to"></span><input type="date" name="dateTo" required></label>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend><span data-i18n="target.time"></span> <span class="hint" data-i18n="target.time_hint"></span></legend>
+      <div class="seg" role="radiogroup">
+        <label><input type="radio" name="timeMode" value="range" checked> <span data-i18n="target.mode_range"></span></label>
+        <label><input type="radio" name="timeMode" value="times"> <span data-i18n="target.mode_times"></span></label>
+      </div>
+      <div id="time-range" class="grid2">
+        <label><span data-i18n="target.time_from"></span><select name="timeFrom" id="time-from"></select></label>
+        <label><span data-i18n="target.time_to"></span><select name="timeTo" id="time-to"></select></label>
+      </div>
+      <div id="time-times" hidden>
+        <p class="hint" data-i18n="target.times_hint"></p>
+        <div id="time-grid" class="time-grid"></div>
+      </div>
+    </fieldset>
+
+    <p class="error" id="target-error"></p>
+    <div class="row end"><button value="cancel" formnovalidate data-i18n="btn.cancel"></button><button id="target-submit" value="ok" class="primary" data-i18n="target.save"></button></div>
+  </form>
+</dialog>
+<script type="module" src="/app.js"></script>
 </body>
 </html>

@@ -55,14 +55,12 @@ describe('Limiter', () => {
     expect(times).toEqual([1_000_000, 1_000_000 + H.globalMinGapMs, 1_000_000 + 2 * H.globalMinGapMs]);
   });
 
-  test('reportBlocked 连续返回 5、10、20 分钟，到上限后不再增加；reportOk 后重置', () => {
-    const { limiter } = mk();
-    expect(limiter.reportBlocked()).toBe(5 * MIN);
-    expect(limiter.reportBlocked()).toBe(10 * MIN);
-    expect(limiter.reportBlocked()).toBe(20 * MIN);
-    expect(limiter.reportBlocked()).toBe(40 * MIN);
-    expect(limiter.reportBlocked()).toBe(60 * MIN);
-    expect(limiter.reportBlocked()).toBe(60 * MIN);
+  test('退避结束后又被拦：5、10、20、40、60 分钟，到上限后不再增加；reportOk 后重置', async () => {
+    const { clock, limiter } = mk();
+    for (const m of [5, 10, 20, 40, 60, 60]) {
+      expect(limiter.reportBlocked()).toBe(m * MIN);
+      await clock.advance(m * MIN);
+    }
     limiter.reportOk();
     expect(limiter.reportBlocked()).toBe(5 * MIN);
   });
@@ -108,11 +106,10 @@ describe('Scheduler', () => {
 
   test('超过学员上限的 start 返回 false，已在运行的重复 start 返回 true', () => {
     const { sch } = mk(async () => {});
+    for (let i = 1; i <= H.maxActiveStudents; i++) expect(sch.start(i)).toBe(true);
+    expect(sch.start(H.maxActiveStudents + 1)).toBe(false);
     expect(sch.start(1)).toBe(true);
-    expect(sch.start(2)).toBe(true);
-    expect(sch.start(3)).toBe(false);
-    expect(sch.start(1)).toBe(true);
-    expect(sch.activeIds()).toEqual([1, 2]);
+    expect(sch.activeIds()).toHaveLength(H.maxActiveStudents);
   });
 
   test('间隔在 ±20% 之内：random 取 0 和 1 的两个极端', async () => {
@@ -192,5 +189,100 @@ describe('Scheduler', () => {
     expect(n).toBe(2 + 5);
     expect(sch.activeIds()).toEqual([2]);
     expect(sch.start(3)).toBe(true);
+  });
+});
+
+describe('Scheduler：间隔可调与运行信息', () => {
+  test('每个学员可以有自己的间隔', async () => {
+    const calls: [number, number][] = [];
+    const clock = new FakeClock(0);
+    const sch = new Scheduler(clock, H, async (id) => void calls.push([id, clock.now()]), () => 0.5, (id) => (id === 2 ? 5 * MIN : 2 * MIN));
+    sch.start(1);
+    sch.start(2);
+    await clock.advance(5 * MIN);
+    expect(calls.filter(([id]) => id === 1).map(([, t]) => t)).toEqual([0, 2 * MIN, 4 * MIN]);
+    expect(calls.filter(([id]) => id === 2).map(([, t]) => t)).toEqual([0, 5 * MIN]);
+  });
+
+  test('info：正在跑时 running 为 true；等待时给出下一轮时刻', async () => {
+    let release!: () => void;
+    const clock = new FakeClock(0);
+    const sch = new Scheduler(clock, H, () => new Promise<void>((r) => (release = r)), () => 0.5);
+    expect(sch.info(1)).toBeNull();
+    sch.start(1);
+    await clock.advance(0);
+    expect(sch.info(1)).toEqual({ running: true, nextAt: null });
+    await clock.advance(30_000);
+    release();
+    await clock.advance(0);
+    expect(sch.info(1)).toEqual({ running: false, nextAt: 30_000 + 2 * MIN });
+  });
+
+  test('reschedule：等待中改了间隔，按新间隔从上一轮结束算起', async () => {
+    let interval = 10 * MIN;
+    const calls: number[] = [];
+    const clock = new FakeClock(0);
+    const sch = new Scheduler(clock, H, async () => void calls.push(clock.now()), () => 0.5, () => interval);
+    sch.start(1);
+    await clock.advance(3 * MIN);
+    interval = 5 * MIN;
+    sch.reschedule(1);
+    await clock.advance(0);
+    expect(sch.info(1)!.nextAt).toBe(5 * MIN);
+    await clock.advance(2 * MIN);
+    expect(calls).toEqual([0, 5 * MIN]);
+  });
+
+  test('reschedule：新间隔已经过了，立刻跑', async () => {
+    let interval = 10 * MIN;
+    const calls: number[] = [];
+    const clock = new FakeClock(0);
+    const sch = new Scheduler(clock, H, async () => void calls.push(clock.now()), () => 0.5, () => interval);
+    sch.start(1);
+    await clock.advance(4 * MIN);
+    interval = 2 * MIN;
+    sch.reschedule(1);
+    await clock.advance(0);
+    expect(calls).toEqual([0, 4 * MIN]);
+  });
+});
+
+describe('Limiter 退避', () => {
+  const mk = () => {
+    const clock = new FakeClock(1_000_000);
+    return { clock, limiter: new Limiter(clock, H) };
+  };
+  test('waitBackoff：没被拦时立刻返回，不占访问间隔', async () => {
+    const { clock, limiter } = mk();
+    await limiter.waitBackoff();
+    let ok = false;
+    void limiter.acquire().then(() => (ok = true));
+    await clock.advance(0);
+    expect(ok).toBe(true);
+  });
+  test('waitBackoff：被拦后一直等到退避结束', async () => {
+    const { clock, limiter } = mk();
+    const wait = limiter.reportBlocked();
+    expect(limiter.backoffUntil()).toBe(clock.now() + wait);
+    let ok = false;
+    void limiter.waitBackoff().then(() => (ok = true));
+    await clock.advance(wait - 1);
+    expect(ok).toBe(false);
+    await clock.advance(1);
+    expect(ok).toBe(true);
+    expect(limiter.backoffUntil()).toBeNull();
+  });
+  test('退避期间又报被拦（同一次拦截里别的学员也碰上了）：不翻倍', () => {
+    const { clock, limiter } = mk();
+    expect(limiter.reportBlocked()).toBe(5 * MIN);
+    void clock;
+    expect(limiter.reportBlocked()).toBe(5 * MIN);
+    expect(limiter.backoffUntil()).toBe(1_000_000 + 5 * MIN);
+  });
+  test('退避结束后再被拦才翻倍', async () => {
+    const { clock, limiter } = mk();
+    expect(limiter.reportBlocked()).toBe(5 * MIN);
+    await clock.advance(5 * MIN);
+    expect(limiter.reportBlocked()).toBe(10 * MIN);
   });
 });

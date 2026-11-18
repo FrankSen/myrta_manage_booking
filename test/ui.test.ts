@@ -1,3 +1,4 @@
+import { render } from '../src/i18n.ts';
 import { randomBytes } from 'node:crypto';
 import { afterEach, describe, expect, test } from 'vitest';
 import { DEFAULT_SETTINGS } from '../src/config/settings.ts';
@@ -14,7 +15,7 @@ afterEach(async () => {
   server = null;
 });
 
-async function setup(opts: { fetchCurrent?: () => Promise<{ centreName: string; date: string; time: string }> } = {}) {
+async function setup(opts: { fetchCurrent?: () => Promise<{ centreName: string; date: string; time: string }>; openSite?: () => void } = {}) {
   const repo = new Repo(openDb(':memory:'), randomBytes(32));
   const clock = new FakeClock(NOW);
   const limiter = { acquire: async () => {}, reportBlocked: () => 1, reportOk: () => {} };
@@ -28,6 +29,7 @@ async function setup(opts: { fetchCurrent?: () => Promise<{ centreName: string; 
     fetchCurrent: opts.fetchCurrent ?? (async () => ({ centreName: SILVERWATER_NAME, date: '2026-12-30', time: '11:30' })),
     autoRebookEnabled: false,
     now: () => clock.now(),
+    openSite: opts.openSite ?? (() => {}),
   });
   const call = (method: string, path: string, body?: unknown, token: string | null = server!.token) =>
     fetch(`http://127.0.0.1:${server!.port}${path}`, {
@@ -51,7 +53,7 @@ describe('令牌', () => {
     await setup();
     const res = await fetch(`http://127.0.0.1:${server!.port}/`);
     expect(res.status).toBe(200);
-    expect(await res.text()).toContain('<title>');
+    expect(await res.text()).toContain('<title');
   });
   test('只监听本机地址', async () => {
     await setup();
@@ -91,7 +93,7 @@ describe('学员', () => {
     const { call, repo } = await setup({ fetchCurrent: async () => { throw new Error('Booking number 或姓氏不正确'); } });
     const res = await call('POST', '/api/students', { label: 'A', bookingId: '1234567890', surname: 'T' });
     expect(res.status).toBe(422);
-    expect(((await res.json()) as { error: string }).error).toContain('不正确');
+    expect(render('zh', ((await res.json()) as { error: never }).error)).toContain('不正确');
     expect(repo.listStudents()).toHaveLength(0);
   });
 
@@ -124,18 +126,45 @@ describe('目标校验', () => {
 
   test.each([
     ['结束日期早于开始日期', { ...goodTarget, dateFrom: '2026-11-20', dateTo: '2026-11-16' }],
-    ['开始时间不早于结束时间', { ...goodTarget, timeFrom: '12:00', timeTo: '12:00' }],
+    ['开始时间晚于结束时间', { ...goodTarget, timeFrom: '12:15', timeTo: '12:00' }],
+    ['时间不在 15 分钟档上', { ...goodTarget, timeFrom: '09:07' }],
+    ['指定时间不在 15 分钟档上', { ...goodTarget, times: ['09:00', '09:10'] }],
+    ['指定时间格式不对', { ...goodTarget, times: ['9am'] }],
+    ['指定时间不是数组', { ...goodTarget, times: '09:00' }],
     ['日期格式不对', { ...goodTarget, dateFrom: '16/11/2026' }],
     ['日期不存在', { ...goodTarget, dateFrom: '2026-02-30' }],
     ['时间格式不对', { ...goodTarget, timeFrom: '9am' }],
     ['没有选考点', { ...goodTarget, centreIds: [] }],
     ['考点不存在', { ...goodTarget, centreIds: [99999] }],
+    ['超过 2 个考点', { ...goodTarget, centreIds: [SILVERWATER, 112, 20] }],
   ])('不合法：%s → 400，且不保存', async (_name, bad) => {
     const { call, repo } = await setup();
     const id = await create(call);
     const before = repo.getStudent(id)!.target;
     expect((await call('PUT', `/api/students/${id}/target`, bad)).status).toBe(400);
     expect(repo.getStudent(id)!.target).toEqual(before);
+  });
+
+  test('最早时间等于最晚时间：只要这一个时间，合法', async () => {
+    const { call, repo } = await setup();
+    const id = await create(call);
+    const t = { ...goodTarget, timeFrom: '08:00', timeTo: '08:00' };
+    expect((await call('PUT', `/api/students/${id}/target`, t)).status).toBe(200);
+    expect(repo.getStudent(id)!.target).toEqual(t);
+  });
+
+  test('指定时间：去重、排序后保存', async () => {
+    const { call, repo } = await setup();
+    const id = await create(call);
+    expect((await call('PUT', `/api/students/${id}/target`, { ...goodTarget, times: ['13:30', '08:00', '13:30'] })).status).toBe(200);
+    expect(repo.getStudent(id)!.target.times).toEqual(['08:00', '13:30']);
+  });
+
+  test('指定时间为空数组：按时间范围，不保存 times', async () => {
+    const { call, repo } = await setup();
+    const id = await create(call);
+    expect((await call('PUT', `/api/students/${id}/target`, { ...goodTarget, times: [] })).status).toBe(200);
+    expect(repo.getStudent(id)!.target).toEqual(goodTarget);
   });
 
   test('学员不存在：404', async () => {
@@ -158,14 +187,13 @@ describe('开始与暂停', () => {
   test('超过上限：409，界面看不到上限数字', async () => {
     const { call, service } = await setup();
     const ids: number[] = [];
-    for (const l of ['A', 'B', 'C']) {
+    for (const l of ['A', 'B', 'C', 'D', 'E', 'F']) {
       ids.push(((await (await call('POST', '/api/students', { label: l, bookingId: '1234567890', surname: 'T' })).json()) as { id: number }).id);
     }
-    expect((await call('POST', `/api/students/${ids[0]}/start`)).status).toBe(200);
-    expect((await call('POST', `/api/students/${ids[1]}/start`)).status).toBe(200);
-    const res = await call('POST', `/api/students/${ids[2]}/start`);
+    for (const id of ids.slice(0, 5)) expect((await call('POST', `/api/students/${id}/start`)).status).toBe(200);
+    const res = await call('POST', `/api/students/${ids[5]}/start`);
     expect(res.status).toBe(409);
-    expect(JSON.stringify(await res.json())).not.toMatch(/\b2\b/);
+    expect(JSON.stringify(await res.json())).not.toMatch(/\b5\b/);
     const state = JSON.stringify(await (await call('GET', '/api/state')).json());
     expect(state).not.toContain('maxActiveStudents');
     expect(state).not.toContain('checkInterval');
@@ -206,6 +234,26 @@ describe('待确认考位', () => {
     const res = await t.call('POST', `/api/offers/${t.offerId}/accept`);
     expect(await res.json()).toEqual({ result: 'dry_run' });
     expect(session.calls).not.toContain('finish');
+    // 停在确认页：学员数据里带保留信息，可以再显示窗口、放弃
+    const st = (await (await t.call('GET', '/api/students')).json()).students[0];
+    expect(st.hold).toMatchObject({ slot: { date: '2026-11-17', time: '13:00' } });
+    expect(await (await t.call('POST', `/api/students/${st.id}/hold/reveal`)).json()).toEqual({ result: 'ok' });
+    expect(await (await t.call('POST', `/api/students/${st.id}/hold/abandon`)).json()).toEqual({ result: 'resumed' });
+    expect(await (await t.call('POST', `/api/students/${st.id}/hold/submitted`)).json()).toEqual({ result: 'not_held' });
+    expect((await t.call('POST', '/api/students/9999/hold/abandon')).status).toBe(404);
+    await t.service.stopAll();
+  });
+});
+
+describe('立即查一次', () => {
+  test('在刷新：200；没在刷新：409；没有这个学员：404', async () => {
+    const t = await setup();
+    const id = t.repo.addStudent({ label: 'A', bookingId: '1234567890', surname: 'T', current: { centreName: SILVERWATER_NAME, date: '2026-12-30', time: '11:30' }, target: goodTarget });
+    expect((await t.call('POST', `/api/students/${id}/check-now`)).status).toBe(409);
+    await t.call('POST', `/api/students/${id}/start`);
+    expect((await t.call('POST', `/api/students/${id}/check-now`)).status).toBe(200);
+    expect((await t.call('POST', '/api/students/999/check-now')).status).toBe(404);
+    await t.service.stopAll();
   });
 });
 
@@ -233,5 +281,76 @@ describe('事件推送', () => {
   test('事件接口也需要令牌', async () => {
     await setup();
     expect((await fetch(`http://127.0.0.1:${server!.port}/api/events`)).status).toBe(401);
+  });
+});
+
+describe('打开网站', () => {
+  test('需要令牌；带令牌时用系统浏览器打开', async () => {
+    let opened = 0;
+    const { call } = await setup({ openSite: () => opened++ });
+    expect((await call('POST', '/api/open-site', undefined, null)).status).toBe(401);
+    expect(opened).toBe(0);
+    expect((await call('POST', '/api/open-site')).status).toBe(200);
+    expect(opened).toBe(1);
+  });
+});
+
+describe('界面静态文件', () => {
+  test('图标 svg 可访问', async () => {
+    await setup();
+    const res = await fetch(`http://127.0.0.1:${server!.port}/logo.svg`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('svg');
+  });
+});
+
+describe('刷新间隔', () => {
+  const create = async (call: Awaited<ReturnType<typeof setup>>['call']) =>
+    ((await (await call('POST', '/api/students', { label: 'A', bookingId: '1234567890', surname: 'T' })).json()) as { id: number }).id;
+
+  test('state 里有当前间隔、可选项和说明', async () => {
+    const { call } = await setup();
+    const st = (await (await call('GET', '/api/state')).json()) as { intervalMs: number; intervalChoicesMin: number[]; intervalHelp: string[] };
+    expect(st.intervalMs).toBe(2 * 60_000);
+    expect(st.intervalChoicesMin[0]).toBe(1);
+    expect(render('zh', st.intervalHelp as never)).toContain('为什么不是越快越好');
+  });
+
+  test.each([[30_000], [90_000], [-1], ['2'], [null]])('全局间隔不合法：%s → 400', async (ms) => {
+    const { call, service } = await setup();
+    expect((await call('PUT', '/api/settings/interval', { ms })).status).toBe(400);
+    expect(service.globalInterval()).toBe(2 * 60_000);
+  });
+
+  test('全局间隔：改成 5 分钟', async () => {
+    const { call, service } = await setup();
+    expect((await call('PUT', '/api/settings/interval', { ms: 5 * 60_000 })).status).toBe(200);
+    expect(service.globalInterval()).toBe(5 * 60_000);
+  });
+
+  test('学员单独间隔：设置、取消；学员列表里能看到生效的间隔', async () => {
+    const { call } = await setup();
+    const id = await create(call);
+    const r = (await (await call('PUT', `/api/students/${id}/interval`, { ms: 10 * 60_000 })).json()) as { intervalMs: number; effectiveIntervalMs: number };
+    expect(r).toMatchObject({ intervalMs: 10 * 60_000, effectiveIntervalMs: 10 * 60_000 });
+    const back = (await (await call('PUT', `/api/students/${id}/interval`, { ms: null })).json()) as { intervalMs: number | null; effectiveIntervalMs: number };
+    expect(back).toMatchObject({ intervalMs: null, effectiveIntervalMs: 2 * 60_000 });
+    expect((await call('PUT', `/api/students/${id}/interval`, { ms: 1000 })).status).toBe(400);
+    expect((await call('PUT', '/api/students/999/interval', { ms: 60_000 })).status).toBe(404);
+  });
+
+  test('学员列表带服务器时间、轮数、进度', async () => {
+    const { call, clock } = await setup();
+    const id = await create(call);
+    await call('PUT', `/api/students/${id}/target`, goodTarget);
+    await call('POST', `/api/students/${id}/start`);
+    await clock.advance(0);
+    const body = (await (await call('GET', '/api/students')).json()) as { now: number; students: { rounds: number; progress: { nextAt: number } }[] };
+    expect(body.now).toBe(NOW);
+    expect(body.students[0]!.rounds).toBe(1);
+    // 间隔有 ±20% 随机浮动
+    const wait = body.students[0]!.progress.nextAt - NOW;
+    expect(wait).toBeGreaterThanOrEqual(0.8 * 2 * 60_000);
+    expect(wait).toBeLessThanOrEqual(1.2 * 2 * 60_000);
   });
 });

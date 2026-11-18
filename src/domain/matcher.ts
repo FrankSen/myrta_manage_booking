@@ -1,9 +1,8 @@
-import { minDistanceKm } from './geo.ts';
-import { LOCK_MS, diffDays, minutesOf, sydneyInstant } from './time.ts';
+import { msg, type Text } from '../i18n.ts';
+import { LOCK_MS, addDays, diffDays, minutesOf, sydneyInstant } from './time.ts';
 import type { CentreIndex, MatchResult, Slot, Target, Tolerance } from './types.ts';
 
 export const DEFAULT_TOLERANCE: Tolerance = {
-  maxDistanceKm: 10,
   maxTimeMinutes: 60,
   maxDateDays: 0,
 };
@@ -19,6 +18,12 @@ export function minutesOutside(time: string, from: string, to: string): number {
   if (t < minutesOf(from)) return minutesOf(from) - t;
   if (t > minutesOf(to)) return t - minutesOf(to);
   return 0;
+}
+
+/** 与最近一个指定时间相差多少分钟 */
+export function minutesFromNearest(time: string, times: readonly string[]): number {
+  const t = minutesOf(time);
+  return Math.min(...times.map((x) => Math.abs(minutesOf(x) - t)));
 }
 
 /** 日期超出目标日期范围多少天，范围内为 0 */
@@ -44,26 +49,34 @@ export function evaluate(
   if (!isBookable(slot, nowMs)) return NONE;
 
   const dateOut = daysOutside(slot.date, target.dateFrom, target.dateTo);
-  const timeOut = minutesOutside(slot.time, target.timeFrom, target.timeTo);
+  const byTimes = (target.times?.length ?? 0) > 0;
+  const timeOut = byTimes ? minutesFromNearest(slot.time, target.times!) : minutesOutside(slot.time, target.timeFrom, target.timeTo);
   const centreIsTarget = target.centreIds.includes(slot.centreId);
 
   if (dateOut === 0 && timeOut === 0 && centreIsTarget) {
     return { kind: 'exact', notes: [] };
   }
 
-  const notes: string[] = [];
+  const notes: Text[] = [];
 
   if (dateOut > tolerance.maxDateDays) return NONE;
-  if (dateOut > 0) notes.push(`日期超出目标范围 ${dateOut} 天`);
+  if (dateOut > 0) notes.push(msg('near.date', { n: dateOut }));
 
   if (timeOut > tolerance.maxTimeMinutes) return NONE;
-  if (timeOut > 0) notes.push(`时间超出目标时间段 ${timeOut} 分钟`);
+  if (timeOut > 0) notes.push(msg(byTimes ? 'near.time_times' : 'near.time_range', { n: timeOut }));
 
-  if (!centreIsTarget) {
-    const km = minDistanceKm(slot.centreId, target.centreIds, centres);
-    if (km > tolerance.maxDistanceKm) return NONE;
-    notes.push(`距目标考点 ${km.toFixed(1)} 公里`);
-  }
+  // 只算目标考点：别的考点再近也不算接近
+  if (!centreIsTarget) return NONE;
 
   return { kind: 'near', notes };
+}
+
+/**
+ * 这个学员最晚能刷新到什么时候（UTC 毫秒）：原考试前 48 小时预约锁定；
+ * 目标最晚一天（含日期容差）的 23:59 前 48 小时，之后没有可改的日子。取两者较早的
+ */
+export function refreshDeadline(current: { date: string; time: string }, target: Pick<Target, 'dateTo'>, maxDateDays: number): { at: number; reason: 'locked' | 'target' } {
+  const locked = sydneyInstant(current.date, current.time) - LOCK_MS;
+  const targetEnd = sydneyInstant(addDays(target.dateTo, maxDateDays), '23:59') - LOCK_MS;
+  return locked <= targetEnd ? { at: locked, reason: 'locked' } : { at: targetEnd, reason: 'target' };
 }

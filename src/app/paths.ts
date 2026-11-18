@@ -8,7 +8,7 @@ export interface RuntimePaths {
   settings: string;
   lock: string;
   browserProfiles: string;
-  uiProfile: string;
+  license: string;
 }
 
 export function runtimePaths(dir: string): RuntimePaths {
@@ -19,6 +19,6 @@ export function runtimePaths(dir: string): RuntimePaths {
     settings: join(dir, 'settings.json'),
     lock: join(dir, 'app.lock'),
     browserProfiles: join(dir, 'browser-profile'),
-    uiProfile: join(dir, 'ui-profile'),
+    license: join(dir, 'license.json'),
   };
 }

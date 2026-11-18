@@ -25,3 +25,4 @@ Thumbs.db
 
 # 运行时数据（学员信息、密钥、日志）
 runtime/
+.tmp/

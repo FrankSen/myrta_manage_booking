@@ -1,10 +1,10 @@
 # 交接说明（新会话先读这个）
 
-更新时间：2026-11-11 晚。项目目录：`/Users/smy/workstation/myrta_manage_booking`，已是 git 仓库（分支 main）。
+更新时间：2026-11-16。项目目录：`/Users/smy/workstation/myrta_manage_booking`，git 仓库。当前分支 `feat/electron-app`（基于 `feat/real-session`），都尚未合并到 main。
 
 ## 项目是什么
 
-给驾校教练用的 Windows 桌面工具。教练为每个学员设定目标考点和时间段，工具持续刷新 myrta.com（NSW 驾考预约），出现完全符合的考位就自动改约，出现接近的考位就通知教练确认。
+给驾校教练用的桌面独立应用（Electron，Windows 为主，也有 Mac 版）。教练为每个学员设定目标考点和时间段，工具持续刷新 myrta.com（NSW 驾考预约），出现完全符合的考位就自动改约，出现接近的考位就通知教练确认。
 
 必读文档：
 - `docs/requirements-architecture.md`：需求、规则、站点行为、架构图、风险
@@ -16,7 +16,10 @@
 - 改约成功后，该学员任务结束；不满意由教练重新发起。
 - 同时刷新的学员上限 2 个、间隔 2 分钟，放在隐藏配置里，界面不显示。
 - 通知只做桌面通知。先做 Windows，架构保持跨平台。
-- 技术选型：Node 24 本地服务 + Chrome `--app` 窗口界面，**不用 Electron**（本机下载 Electron 二进制太慢）。数据库用 `node:sqlite`。
+- 技术选型（2026-11-16 改）：**Electron 38.7.2 独立应用**。主进程跑引擎、`node:sqlite` 数据库和本地界面服务，界面是 Electron 窗口。**学员刷新仍用本机 Chrome/Edge**：Electron 自带的 Chromium 访问 myrta.com 返回 403（改 UA 和 `sec-ch-ua` 也不行），见 `docs/specs/2026-11-16-electron-app-design.md`。Electron 二进制从 npmmirror 下载（`scripts/electron-bin.ts`），不走 electron 包自带的 GitHub 下载。
+- 同时刷新上限 5 个学员（隐藏配置），每个学员最多 2 个考点。
+- 试用授权：Ed25519 签名的 `license.json`，只限到期日期（悉尼时间当天结束），发现电脑时间调回就停。私钥在 `~/.myrta-license/private.pem`，**不入库**，丢了要换密钥对并改 `src/license/public-key.ts`，已发的授权全部失效。签发：`node scripts/license.ts --name 张教练 --until 2026-12-31`。
+- 界面中英文可切换，默认中文。状态、记录、错误存成 `{k, a}` 消息（`src/ui/public/i18n.js`，界面和服务端共用），旧数据的中文句子原样显示。时间一律按悉尼时间显示。
 - 不能改到距现在不足 48 小时的考位；原考试不足 48 小时则预约锁定，停止该学员。
 
 ## 当前进度
@@ -31,22 +34,98 @@
 | 6 浏览器接管与站点流程 | 完成，已用 Du 的预约联网验证到确认页 |
 | 7 状态机与教练确认 | 完成 |
 | 8 本地界面与通知 | 完成 |
-| 9 装配 | **部分**：入口、单实例锁、配置文件完成；**`npm start` 仍用占位 `UnavailableSession`，没接真实 `BrowserSession`**；Windows 打包、使用手册没做 |
+| 9 装配 | **基本完成**：`npm start` 已接真实 `BrowserSession`（`allowFinish: false`）；Windows 打包脚本和使用手册完成。**没在真实 Windows 上跑过** |
 | 10 第一次真实改约 | **等教练通知**，`BrowserSession.finish()` 故意没实现 |
 
-191 个测试全部通过（`npm test`），类型检查通过（`npm run typecheck`）。
+203 个测试全部通过（`npm test`），类型检查通过（`npm run typecheck`）。
+
+## 2026-11-12 做了什么
+
+- `src/main.ts` 用 `new BrowserSession({ profileDir, allowFinish: false })`。每个学员的资料目录 `runtime/browser-profile/<id>`；添加学员的临时读取用 `probe` 目录，排队执行（同一目录不能开两个浏览器），每次读取前清空。
+- `startApp` 新增 `finishAvailable`：为 false 时，即使 `settings.json` 开了 `autoRebookEnabled` 也强制关闭并提示。否则提交会报错并被记成"可能已提交"。
+- 退出：先关浏览器让卡住的页面操作立即结束（最多再等 3 秒），退出中不再开新浏览器；处理 `SIGHUP`/`SIGBREAK`（Windows 关窗口）。`launchBrowser` 的 `close()` 会等进程真正退出。
+- 选时间页既没有考位数据也没有"没有考位"提示时，不再当作 0 个考位（之前一次实测读到 0 个，可能就是这个原因），等 20 秒仍没有就报错。
+- **会话复用已联网验证**：2 分钟一轮可一直复用；空闲 10 分钟仍可复用，空闲 15 分钟失效并自动重新登录。复用一轮约 35–65 秒。脚本 `scripts/session-reuse.ts`。
+- 打包：`node scripts/build.ts` → `release/myrta-rebook/`（`启动.bat`、`node/node.exe`、`app/`、`使用手册.txt`）和 `release/myrta-rebook-0.1.0-win-x64.zip`（约 37MB）。node.exe 用 curl 下载，多个源依次尝试、续传，用官方 SHASUMS256 校验，缓存在 `release/cache/`。zip 用自己写的 `scripts/zip.ts`，给中文文件名设 UTF-8 标志（macOS 的 zip/ditto 都不设，Windows 会乱码）。
+- 运行数据放在打包文件夹的 `runtime/`，在 `app/` 外面，升级时保留。
+- 使用手册 `docs/user-guide.md`。
+
+## 2026-11-12 下午做了什么（设计见 `docs/specs/2026-11-12-ui-time-mac-design.md`）
+
+- 界面改为驾考风格；"需要你处理"区；"等你确认"改名"已找到（未提交）"，可一键用系统浏览器打开 myrta.com。
+- 目标时间 15 分钟一档；新增指定时间（`Target.times`），接近按最近的指定时间算；最早时间联动最晚时间，反之不联动。
+- 浏览器加 `QUIET_ARGS` 关闭后台下载（`MYRTA_QUIET=0` 可去掉，用于排查）。已联网冒烟通过，站点不拦截。
+- `scripts/build.ts <win-x64|mac-arm64|mac-x64>`，输出 `release/<平台>/` 和 `release/myrta-rebook-<版本>-<平台>.zip`。Mac 包用 `启动.command`；zip 保留可执行权限。
+- Mac 包完整联网验证：解压（带隔离标记）→ 启动 → 添加 Du（69 秒）→ 设置指定时间 → 刷新一轮出 5 个接近考位 → "改到这个时间"走到确认页（45 秒，未提交）→ 关窗口信号后程序、学员浏览器、界面窗口全部关闭。之后全新会话核对 Du 预约未变。
+- 注意：VPN 断开时出口变成国内 IP，站点一律 403，不是参数问题。联网测试前先 `curl -s ipinfo.io/json` 看出口国家应为 AU。
+- 为什么必须开浏览器窗口：无界面（headless）浏览器和 Playwright 直接启动的浏览器都会被 Akamai 拦。窗口可以最小化。
+
+## 2026-11-12 晚做了什么
+
+- 现有预约（浅灰蓝）和目标（浅绿）分色，中间加箭头。
+- 刷新间隔可调：全局（顶栏"⏱"按钮，写回 `runtime/settings.json` 的 `hidden.checkIntervalMs`）和学员单独（`students.interval_ms`，空表示跟随全局）。可选 1、2、3、5、10、15、30 分钟，最小 1 分钟，说明文字在 `src/config/interval.ts`。改了立即重新计时（`Scheduler.reschedule`）。
+- 学员卡片显示已查轮数（`students.rounds`，重新开始清零，程序重启后自动继续不清零）、下一轮倒计时、本轮阶段（`Service.progress`）、还可刷新多久（`refreshDeadline`，引擎停止判断也用它）。
+- 数据库加列由 `migrate()` 自动完成，旧数据库直接可用。
+- 联网验证（Mac 包）：真实一轮约 2 分钟（新资料目录首次登录约 60 秒 + 两个考点），轮数和倒计时正确；Du 预约未变。
+
+## 2026-11-16 做了什么（设计 `docs/specs/2026-11-16-electron-app-design.md`，计划 `docs/plans/2026-11-16-electron-app-plan.md`）
+
+- 改为 Electron 独立应用：`src/electron/main.ts`。关窗口 = 退出（有学员在刷新/正在改约时先确认），单实例，数据在 `%APPDATA%\MyRTA Rebook` / `~/Library/Application Support/MyRTA Rebook`，Windows 首次运行建桌面和开始菜单快捷方式。去掉了 Chrome `--app` 界面窗口和 `启动.bat`/`启动.command`。`npm start` 仍可用（开发调试，打印界面地址）。`npm run app` 用 Electron 跑开发版。
+- 打包 `node scripts/build.ts <win-x64|mac-arm64|mac-x64>`：Windows `MyRTA Rebook.exe`（resedit 改图标和版本信息），zip 约 136MB；Mac `MyRTA Rebook.app`（改 Info.plist，本机临时签名 `codesign -s -`），zip 约 111MB。应用代码在 `resources/app`，不打 asar。图标由 `scripts/icons.ts` 从 logo.svg 生成，结果在 `assets/`。
+- iOA"下载完成"弹窗：不是下载，是 Chrome 往资料目录写 LOCK/LOG 等文件。添加学员时读取用的 `probe` 目录改名给该学员用，少建一个资料目录。彻底解决要把数据目录下 `browser-profile` 加白名单，写进了使用手册。
+- 5 个学员：上限 5、每人最多 2 个考点、卡片显示"预计每 X 分钟刷新一次"（`expectedCycleMs`：设定间隔 + 一轮耗时，和"全部学员一轮总访问次数 × 20 秒"取大）。
+- 试用授权、中英文界面，见上面"已确定的决定"。
+- 测试 305 个，Node 24（`npm test`）和 Electron 内置 Node 22（`npm run test:electron`）都通过。
+- Mac 包本地验证：带隔离标记解压 → 去标记 → 打开，界面窗口正常、授权提示正常、外部链接被拦、关闭后进程退出。
+
+- 联网验证（Mac 包，出口 Sydney AU）：导入授权 → 添加 Du（78 秒）→ 刷新一轮（约 2 分钟）→ 退出，无残留浏览器 → 换一份新解压的程序、同一数据目录重新打开，Du 自动继续，轮数从 1 到 2，授权还在。全新会话核对 Du 预约未变。
+- 联网发现并修复：(1) SIGTERM/关机时弹确认框卡住，学员 Chrome 留在后台，改为不经过窗口的退出直接收尾；(2) 暂停后马上退出，正在关的浏览器没等关完，改为 `stopAll` 等所有正在关闭的浏览器。
+- 学员 Chrome 启动后自动最小化（CDP `Browser.setWindowBounds`）。实测最小化状态下登录、选考点、键入日期、读两周考位都正常，站点不拦。`MYRTA_MINIMIZE=0` 可关掉。
+
+## 2026-11-16 确认页改为停住等教练
+
+- 自动改约关闭时，完全符合或教练点"改到这个时间"后，走到确认页就停住：浏览器不关，窗口恢复到前面，保留 10 分钟（`HOLD_MS`）。期间只有这个学员不刷新。
+- 教练可以直接在那个浏览器窗口里提交，然后点"我已在网站提交"；软件用 `login()` 重新读取预约核实（能后退就后退，停在完成页时重新登录）。预约变成所选考位就标记已改约；没变就继续刷新；读不到就暂停报警；变成别的考位就暂停请教练核对。
+- "放弃，继续找"：回到查看预约页、窗口最小化、同一个浏览器继续刷新；这个考位本次运行内不再停下（`CheckState.skipped`）。超时自动放弃（不记入不再停下）。
+- 暂停、删除、退出会取消保留并关浏览器；退出时提示"有学员停在确认页"。重启后状态是"已找到"，没有保留，界面显示旧的"打开 myrta.com / 继续找"。
+- 2026-11-16 联网实测（AU）：停在 Silverwater 2026-11-20 12:00 确认页，窗口 normal；放弃用了约 20 秒，窗口 minimized，预约未变；下一轮跳过该考位，停在 2026-11-23 08:00。全新会话核对 Du 预约未变。
+- "提交改约"按钮（软件代点 Finish）是第二步，要先在教练在场、同意的情况下真实提交一次，摸清完成页。
+
+## 2026-11-17 原考位放出后立即查找
+
+- 教练场景：学员 A 改到别的时间，学员 B 想要 A 原来的时间（都是正规报名，不是转让）。A 改约后原考位放回网站，B 立即去查。
+- `Service.released(fromId, old)`：A 的预约变了（自动改约核实成功、"我已在网站提交"核实成功、保留期间预约变了、或登录时读到预约在软件外被改），对目标完全包含这个考位、正在刷新的其他学员 `runNow`，`RELEASE_RECHECK_MS`（1 分钟）后再补一次。原考位在 48 小时内不触发。仍受全局限速。
+- `Service.checkNow(id)` + `POST /api/students/:id/check-now` + 卡片"立即查一次"按钮：A 不在软件里时教练手动触发。
+
+## 2026-11-17 资料错误时不再卡住
+
+- 原因：资料不对时站点留在登录页显示"The details you have entered are incorrect, please check the details and try again or call the Contact Centre on 13 22 13."，不跳转；旧代码等 URL 跳转 90 秒，旧正则也认不出这句。
+- 现在 `waitForMain` 每秒看一次页面新出现的文字（`loginProblem`，和点 Continue 前对比），认出来立刻报 `bad_credentials`，带网站原话；在登录页 20 秒后有没见过的新文字也直接报出原话。实测点 Continue 后 2 秒报错。
+- 添加学员：读取中可以点"取消"（关掉读取用的浏览器）；网站正在整体退避超过 2 分钟时直接提示稍后再加，不排队干等。
+
+## 2026-11-17 退避期间仍在访问网站，拦截越拉越长
+
+- 现象（教练截图）：放弃确认页约 6 分钟后被拦一次，之后 2 分钟、40 秒、1 分钟、2 分钟又被拦，退避 5→10→20→40→60 分钟。
+- 原因：退避只挡住"查考点"前的限速排队，每一轮的开浏览器和登录不受限，退避期间照样访问网站，每次被拦又把退避翻倍。
+- 修复：`Limiter.waitBackoff()`，每轮开浏览器、登录之前先等退避结束（界面阶段显示"暂停访问中"）；"改到这个时间"同样等。退避期间再报被拦不翻倍，退避结束后再被拦才翻倍。放弃确认页时如果正在退避，直接关浏览器不碰网站；放弃后下一轮按刷新间隔来（`Scheduler.start(id, delayFirst)`），不马上再访问。界面顶部显示"网站暂时拒绝访问，还要 X（HH:MM 恢复）"。
+- 第一次被拦本身的原因还不确定（可能是确认页来回、访问密度）。退避修好后观察实际运行再判断。
+
+## 2026-11-17 去掉附近考点；暂停立即停下
+
+- 教练要求不查附近考点（界面上"查看 North Rocks"让人误解）。去掉了 `nearbyCentres`/轮换/`maxDistanceKm`，匹配只认目标考点（时间差 1 小时内仍算"接近"）。旧配置里的 `tolerance.maxDistanceKm` 忽略。启动时把以前附近考点留下的待确认考位标记为 dismissed。
+- 暂停：以前只停调度，正在跑的这一轮要等跑完（浏览器还在查），教练手动关浏览器后记成"页面加载超时"。现在每次操作有自己的中断器（`Service.ops`），暂停时中断并立刻关浏览器，不记错误、不算轮数。
+- 浏览器被手动关掉（Playwright "has been closed"）：记一条"浏览器窗口被关闭"，下一轮重新打开，不计入连续失败。`errorText` 只取报错第一行，去掉终端颜色码。
 
 ## 下一步（按顺序）
 
-1. **接真实站点操作**：改 `src/main.ts`，`openSession` 用 `new BrowserSession({ profileDir, allowFinish: false })`。每个学员一个固定 profile 目录（`runtime/browser-profile/<学员id>`），保留 cookie；添加学员时的临时读取用 `probe` 目录。同时检查 `src/app/start.ts` 的 `fetchCurrent`：它在登录读取后会关闭会话，注意与刷新用的会话分开。
-2. **会话复用要验证**：2 分钟间隔只有登录会话复用才可行（首次登录 70–95 秒）。`BrowserSession.login()` 已写了复用逻辑，但没有联网测过"保持多久"。
-3. **Windows 打包**（计划任务 9）：`src/`、`data/`、生产依赖、Windows 版 `node.exe` 放进一个文件夹，加 `启动.bat`。`node.exe` 从 `https://cdn.npmmirror.com/binaries/node/v24.14.0/node-v24.14.0-win-x64.zip` 下载（约 8MB/s，比官方源快）。
-4. **使用手册** `docs/user-guide.md`。
-5. 以上做完后告诉教练，等教练通知再做任务 10。
+1. **在真实 Windows 上走一遍**：解压 zip，双击 `MyRTA Rebook.exe`，看 SmartScreen 提示、快捷方式、中文显示（英文 Windows 也要看）、能找到 Chrome/Edge、添加学员能读到预约、关窗口后浏览器都关了、iOA 弹窗是否减少。
+2. 把分支合并到 main（问用户）。
+3. 以上做完后告诉教练，等教练通知再做任务 10（真实改约）。
 
 ## 本机环境要点
 
-- 开发机 macOS，Node v24.14.0。npm 默认镜像（npmmirror）会卡住，`.npmrc` 已指向 `registry.npmjs.org`。
+- 开发机 macOS，Node v24.14.0。npm 默认镜像（npmmirror）会卡住，`.npmrc` 已指向 `registry.npmjs.org`。装依赖要设 `ELECTRON_SKIP_BINARY_DOWNLOAD=1`，再 `node scripts/electron-bin.ts` 取 Electron 二进制。
+- Electron 窗口排查：`MYRTA_DEBUG_PORT=9333` 开放界面窗口的调试端口，可用 Playwright `connectOverCDP` 连上截图。
 - `node src/xxx.ts` 可直接运行 TS；`tsconfig` 开了 `erasableSyntaxOnly`，不能用构造函数参数属性、enum 等。
 - 脚本里别用 `timeout` 命令（本机没有）；联网脚本自己设硬超时。
 - macOS 的 `sed -i` 要写 `sed -i ''`，复杂替换用 python。
@@ -74,11 +153,10 @@
 
 ## 尚未验证
 
-- 完成页的样子、改约次数限制和费用、原考位是否释放、会话超时时长（都要等第一次真实改约）。
-- 登录会话能保持多久。
+- 完成页的样子、改约次数限制和费用、原考位是否释放（都要等第一次真实改约）。
 - Akamai 对工具访问频率的容忍度，靠运行中观察和自动退避。
 - 在真实 Windows 上的 Chrome/Edge 启动。
 
 ## 隐私约束
 
-Booking number、姓氏、聊天内容不写进代码、测试、夹具、文档。测试用假数据（`1234567890` / `Testsurname`）。运行时数据在 `runtime/`，已忽略。教练聊天截图 `feature_issuejpg.jpg` 同样不入库。`/tmp/myrta_probe` 里还有早期探测脚本和聊天 OCR 文字，含对话内容，清理前先问用户。
+Booking number、姓氏、聊天内容不写进代码、测试、夹具、文档。测试用假数据（`1234567890` / `Testsurname`）。运行时数据在系统应用数据目录（`npm start` 时是项目里的 `runtime/`，已忽略）。教练聊天截图 `feature_issuejpg.jpg` 同样不入库。`/tmp/myrta_probe` 里还有早期探测脚本和聊天 OCR 文字，含对话内容，清理前先问用户。

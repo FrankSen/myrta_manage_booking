@@ -1,4 +1,5 @@
 import type { Tolerance } from '../domain/types.ts';
+import { DEFAULT_LANG, isLang, type Lang } from '../i18n.ts';
 
 /** 隐藏配置：界面上不显示，以后作为收费功能开放 */
 export interface HiddenSettings {
@@ -20,19 +21,22 @@ export interface Settings {
   tolerance: Tolerance;
   /** 自动改约总开关。第一次真实改约验证之前必须为 false */
   autoRebookEnabled: boolean;
+  /** 界面语言，教练在顶栏切换，写回 settings.json 的 ui.language */
+  language: Lang;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
   hidden: {
-    maxActiveStudents: 2,
+    maxActiveStudents: 5,
     checkIntervalMs: 2 * 60_000,
     jitterRatio: 0.2,
     globalMinGapMs: 20_000,
     backoffBaseMs: 5 * 60_000,
     backoffMaxMs: 60 * 60_000,
   },
-  tolerance: { maxDistanceKm: 10, maxTimeMinutes: 60, maxDateDays: 0 },
+  tolerance: { maxTimeMinutes: 60, maxDateDays: 0 },
   autoRebookEnabled: false,
+  language: DEFAULT_LANG,
 };
 
 /** 用文件里的值覆盖默认值，只接受已知字段，类型不对就报错 */
@@ -51,7 +55,10 @@ export function mergeSettings(base: Settings, override: unknown): Settings {
   if (o.autoRebookEnabled !== undefined && typeof o.autoRebookEnabled !== 'boolean') {
     throw new Error('配置 autoRebookEnabled 必须是 true 或 false');
   }
+  const ui = o.ui as Record<string, unknown> | undefined;
+  if (ui?.language !== undefined && !isLang(ui.language)) throw new Error('配置 ui.language 只能是 zh 或 en');
   return {
+    language: (ui?.language as Lang | undefined) ?? base.language,
     hidden: {
       maxActiveStudents: num('hidden', h, 'maxActiveStudents', base.hidden.maxActiveStudents),
       checkIntervalMs: num('hidden', h, 'checkIntervalMs', base.hidden.checkIntervalMs),
@@ -61,7 +68,6 @@ export function mergeSettings(base: Settings, override: unknown): Settings {
       backoffMaxMs: num('hidden', h, 'backoffMaxMs', base.hidden.backoffMaxMs),
     },
     tolerance: {
-      maxDistanceKm: num('tolerance', t, 'maxDistanceKm', base.tolerance.maxDistanceKm),
       maxTimeMinutes: num('tolerance', t, 'maxTimeMinutes', base.tolerance.maxTimeMinutes),
       maxDateDays: num('tolerance', t, 'maxDateDays', base.tolerance.maxDateDays),
     },
