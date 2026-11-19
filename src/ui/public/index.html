@@ -16,6 +16,7 @@
     <div class="sub" data-i18n="app.subtitle"></div>
   </div>
   <button id="btn-interval" class="sign-btn" data-i18n-title="top.interval_title">⏱ <span id="interval-label"></span></button>
+  <button id="btn-feishu" class="ghost small" hidden data-i18n="feishu.btn" data-i18n-title="feishu.btn_title"></button>
   <div class="sign" id="mode"></div>
   <button id="btn-notify" class="ghost" hidden data-i18n="notify.enable"></button>
   <div class="license-tag" id="license-tag" hidden></div>
@@ -91,6 +92,31 @@
     </details>
     <p class="error" id="interval-error"></p>
     <div class="row end"><button value="cancel" formnovalidate data-i18n="btn.cancel"></button><button id="interval-submit" value="ok" class="primary" data-i18n="btn.save"></button></div>
+  </form>
+</dialog>
+
+<dialog id="dlg-handover" class="wide">
+  <form method="dialog" id="form-handover">
+    <h3 data-i18n="handover.title"></h3>
+    <p id="handover-intro"></p>
+    <label><span data-i18n="handover.to"></span><select id="handover-to"></select></label>
+    <p class="hint" id="handover-none" data-i18n="handover.none" hidden></p>
+    <details class="explain" open>
+      <summary data-i18n="handover.how"></summary>
+      <div data-i18n-html="handover.help"></div>
+    </details>
+    <p class="error" id="handover-error"></p>
+    <div class="row end"><button value="cancel" formnovalidate data-i18n="btn.cancel"></button><button id="handover-submit" value="ok" class="primary" data-i18n="handover.submit"></button></div>
+  </form>
+</dialog>
+
+<dialog id="dlg-feishu">
+  <form method="dialog" id="form-feishu">
+    <h3 data-i18n="feishu.title"></h3>
+    <p class="hint" data-i18n="feishu.hint"></p>
+    <label><span data-i18n="feishu.url"></span><input name="webhook" type="url" autocomplete="off" data-i18n-ph="feishu.url_ph"></label>
+    <p class="error" id="feishu-error"></p>
+    <div class="row end"><button value="cancel" formnovalidate data-i18n="btn.cancel"></button><button value="ok" class="primary" data-i18n="btn.save"></button></div>
   </form>
 </dialog>
 

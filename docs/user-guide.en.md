@@ -84,7 +84,7 @@ Up to 5 students can refresh at once. The app only checks the centres you chose,
 Pause: clicking "Pause" closes that student's browser straight away and stops the current round.
 
 With many students or centres, refreshing is slower than the interval you set: all students share one
-internet connection and any two visits to the site are at least 20 seconds apart. For example, 5 students
+internet connection and any two visits to the site are at least a few seconds apart. For example, 5 students
 with 2 centres each make about 10 visits per round, so a full cycle takes about 3 to 4 minutes.
 "About every X min in practice" on each card is that real speed.
 
@@ -96,16 +96,22 @@ The blue box is the current booking; the green box is the target.
 3a. Refresh interval
 --------------------
 
-Click "⏱ Every 2 min" at the top to change the interval for all students: 1, 2, 3, 5, 10, 15 or 30 minutes,
-default 2. "Interval" on a card sets it for one student only. Changes apply immediately.
+Click "⏱ Every 5 s" at the top to change the interval for all students: 5, 10 or 30 seconds, or 1, 2, 3, 5,
+10, 15 or 30 minutes; default 5 seconds. "Interval" on a card sets it for one student only. Changes apply immediately.
 
-Why 1 minute is the minimum and faster isn't better:
-- The interval counts from the end of the previous round, and a round itself takes 1 to 1.5 minutes.
+About the refresh interval and the risk of being blocked:
+- The interval counts from the end of the previous round, and a round itself takes 1 to 1.5 minutes. So even
+  with a very short interval, consecutive rounds are still spaced by the length of a round.
 - All students share one connection. Too many visits and myrta.com blocks them; then every student pauses
-  for 5 minutes, doubling with each further block up to 1 hour. One block costs more than refreshing faster saves.
-- Any two visits are at least 20 seconds apart; this can't be changed.
+  for 5 minutes, doubling with each further block up to 1 hour. As requested, the app no longer slows down
+  to avoid blocks.
+- If you get blocked or your IP is banned, restart your router or refresh it to get a new exit IP (a ban
+  usually clears in anything from a couple of weeks to a month).
+- Any two visits are at least a few seconds apart as a safety limit. With many students, the actual refresh
+  is slower than the interval you set.
 
-Tip: use 2 minutes normally; give students who aren't in a hurry 5 or 10 minutes.
+Up to 5 students can refresh at once. If you don't mind being blocked and want to grab slots faster, use 5
+seconds; otherwise give students who aren't in a hurry a longer interval.
 
 
 4. When a slot appears
@@ -135,23 +141,39 @@ Close match (one of your centres, but within 1 hour of your times):
 Notifications: if there's an "Enable notifications" button at the top, click it and allow.
 On Windows, check Settings → System → Notifications if none appear.
 
+Feishu push (so you're notified even away from the computer): click "Feishu" at the top and paste the
+webhook URL of a Feishu group bot (get it in the group's settings → Bots → add a "Custom Bot"; it looks
+like https://open.feishu.cn/open-apis/bot/v2/hook/...). Once set, important messages (slot found, rebooked,
+errors) are pushed to the group. Leave it blank to turn push off.
+
 
 4a. Passing a released slot from one student to another
 -------------------------------------------------------
 
 Student A is moving to another time and student B wants A's current slot. Slots can't be transferred, but when A
-rebooks, A's old slot goes back on the website for anyone to book. The app can make B check the moment it's released:
+rebooks, A's old slot goes back on the website for anyone to book. With "Handover", the app rebooks A itself and makes
+B grab the slot the moment it's released:
 
-1. First set B's target to A's current centre, date and time, and start refreshing B. (Do this first.)
-2. Then rebook A:
-   - A is in the app: submit on the confirm page as usual and click "I submitted on the website". Once the app has
-     checked that A's booking changed, it checks for B right away and again 1 minute later. The log says "A's old slot … was released".
-     If you rebook A directly on the website, the app notices on A's next round and does the same.
-   - A is not in the app: after rebooking A on the website, click "Check now" on B's card straight away.
-3. When B finds it, B stops at the confirm page with the browser window in front; submit it.
+1. Set A's target first (where A should move to).
+2. On A's card click "Hand over to…", choose B and click "Set handover".
+   - B's target is set to A's current slot (same centre, date and time) automatically; it can't be changed during the handover.
+   - Both A and B start refreshing. One-to-one: a student can only be in one handover.
+3. Then you don't need to watch:
+   - When A finds a slot for their own target, the app submits the rebooking itself (registered phone number, terms,
+     Finish) without stopping at the confirm page.
+   - The app reads A's booking back; once it has changed, B grabs A's old slot at once and submits automatically too.
+     If B was paused, it is started automatically.
+   - If you or the student rebook A on the website instead, the app notices on A's next round and sends B in the same way.
+   - Each result shows as a desktop notification and goes to Feishu. The handover ends once B has the slot.
+4. Changed your mind: click "Remove handover" on either card. B's target stays as A's old slot and can be changed.
 
-Note: once released, the slot is visible to everyone on the website, so B getting it isn't guaranteed. A's old slot must be
-more than 48 hours away for B to book it. "Check now" works any time; the minimum gap between site visits still applies.
+Notes:
+- Only students in a handover submit automatically; everyone else still stops at the confirm page for you.
+- Automatic submitting has only been verified against a local simulated site so far; the real submit page hasn't been
+  seen yet. The first time, have the coach present and use a booking that's safe to change (more than 48 hours away).
+- Once released, the slot is visible to everyone, so B getting it isn't guaranteed; if B misses it, B keeps refreshing
+  for that slot. A's old slot must be more than 48 hours away for B to book it.
+- If A isn't in the app: rebook A on the website, then click "Check now" on B's card straight away (with B's target set to A's old slot).
 
 
 5. When the app stops by itself

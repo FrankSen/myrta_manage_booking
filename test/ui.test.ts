@@ -15,7 +15,7 @@ afterEach(async () => {
   server = null;
 });
 
-async function setup(opts: { fetchCurrent?: () => Promise<{ centreName: string; date: string; time: string }>; openSite?: () => void } = {}) {
+async function setup(opts: { fetchCurrent?: () => Promise<{ centreName: string; date: string; time: string }>; openSite?: () => void; feishu?: { get(): string; set(url: string): void } } = {}) {
   const repo = new Repo(openDb(':memory:'), randomBytes(32));
   const clock = new FakeClock(NOW);
   const limiter = { acquire: async () => {}, reportBlocked: () => 1, reportOk: () => {} };
@@ -30,6 +30,7 @@ async function setup(opts: { fetchCurrent?: () => Promise<{ centreName: string; 
     autoRebookEnabled: false,
     now: () => clock.now(),
     openSite: opts.openSite ?? (() => {}),
+    feishu: opts.feishu,
   });
   const call = (method: string, path: string, body?: unknown, token: string | null = server!.token) =>
     fetch(`http://127.0.0.1:${server!.port}${path}`, {
@@ -310,16 +311,16 @@ describe('刷新间隔', () => {
 
   test('state 里有当前间隔、可选项和说明', async () => {
     const { call } = await setup();
-    const st = (await (await call('GET', '/api/state')).json()) as { intervalMs: number; intervalChoicesMin: number[]; intervalHelp: string[] };
-    expect(st.intervalMs).toBe(2 * 60_000);
-    expect(st.intervalChoicesMin[0]).toBe(1);
-    expect(render('zh', st.intervalHelp as never)).toContain('为什么不是越快越好');
+    const st = (await (await call('GET', '/api/state')).json()) as { intervalMs: number; intervalChoicesMs: number[]; intervalHelp: string[] };
+    expect(st.intervalMs).toBe(5_000);
+    expect(st.intervalChoicesMs[0]).toBe(5_000);
+    expect(render('zh', st.intervalHelp as never)).toContain('被拦风险');
   });
 
-  test.each([[30_000], [90_000], [-1], ['2'], [null]])('全局间隔不合法：%s → 400', async (ms) => {
+  test.each([[7_000], [90_001], [-1], ['2'], [null]])('全局间隔不合法：%s → 400', async (ms) => {
     const { call, service } = await setup();
     expect((await call('PUT', '/api/settings/interval', { ms })).status).toBe(400);
-    expect(service.globalInterval()).toBe(2 * 60_000);
+    expect(service.globalInterval()).toBe(5_000);
   });
 
   test('全局间隔：改成 5 分钟', async () => {
@@ -334,7 +335,7 @@ describe('刷新间隔', () => {
     const r = (await (await call('PUT', `/api/students/${id}/interval`, { ms: 10 * 60_000 })).json()) as { intervalMs: number; effectiveIntervalMs: number };
     expect(r).toMatchObject({ intervalMs: 10 * 60_000, effectiveIntervalMs: 10 * 60_000 });
     const back = (await (await call('PUT', `/api/students/${id}/interval`, { ms: null })).json()) as { intervalMs: number | null; effectiveIntervalMs: number };
-    expect(back).toMatchObject({ intervalMs: null, effectiveIntervalMs: 2 * 60_000 });
+    expect(back).toMatchObject({ intervalMs: null, effectiveIntervalMs: 5_000 });
     expect((await call('PUT', `/api/students/${id}/interval`, { ms: 1000 })).status).toBe(400);
     expect((await call('PUT', '/api/students/999/interval', { ms: 60_000 })).status).toBe(404);
   });
@@ -350,7 +351,67 @@ describe('刷新间隔', () => {
     expect(body.students[0]!.rounds).toBe(1);
     // 间隔有 ±20% 随机浮动
     const wait = body.students[0]!.progress.nextAt - NOW;
-    expect(wait).toBeGreaterThanOrEqual(0.8 * 2 * 60_000);
-    expect(wait).toBeLessThanOrEqual(1.2 * 2 * 60_000);
+    expect(wait).toBeGreaterThanOrEqual(0.8 * 5_000);
+    expect(wait).toBeLessThanOrEqual(1.2 * 5_000);
+  });
+
+  test('飞书 Webhook：state 里显示当前值，可设置和清空，非法地址 400', async () => {
+    let saved = '';
+    const { call } = await setup({ feishu: { get: () => saved, set: (u) => void (saved = u) } });
+    const st = (await (await call('GET', '/api/state')).json()) as { feishuWebhook: string | null };
+    expect(st.feishuWebhook).toBe('');
+    const good = 'https://open.feishu.cn/open-apis/bot/v2/hook/abc';
+    expect((await call('PUT', '/api/settings/feishu', { webhook: good })).status).toBe(200);
+    expect(saved).toBe(good);
+    expect((await call('PUT', '/api/settings/feishu', { webhook: 'https://evil.com/x' })).status).toBe(400);
+    expect(saved).toBe(good);
+    // 空串关闭推送
+    expect((await call('PUT', '/api/settings/feishu', { webhook: '' })).status).toBe(200);
+    expect(saved).toBe('');
+  });
+
+  test('没配 feishu 依赖时设置接口返回 404', async () => {
+    const { call } = await setup();
+    expect((await call('PUT', '/api/settings/feishu', { webhook: '' })).status).toBe(404);
+  });
+});
+
+describe('让位接口', () => {
+  async function two() {
+    const t = await setup();
+    const mk = async (label: string, bookingId: string) => ((await (await t.call('POST', '/api/students', { label, bookingId, surname: 'Testsurname' })).json()) as { id: number }).id;
+    const a = await mk('A', '1111111111');
+    const b = await mk('B', '2222222222');
+    await t.call('PUT', `/api/students/${a}/target`, goodTarget);
+    return { ...t, a, b };
+  }
+
+  test('设置后两边都能看到关系；B 的目标锁定，不能改；解除后可以改', async () => {
+    const t = await two();
+    const res = await t.call('PUT', `/api/students/${t.a}/handover`, { to: t.b });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { handoverTo: number }).handoverTo).toBe(t.b);
+    const list = ((await (await t.call('GET', '/api/students')).json()) as { students: { id: number; handoverTo: number | null; handoverFrom: number | null }[] }).students;
+    expect(list.find((s) => s.id === t.a)).toMatchObject({ handoverTo: t.b, handoverFrom: null });
+    expect(list.find((s) => s.id === t.b)).toMatchObject({ handoverTo: null, handoverFrom: t.a });
+    expect((await t.call('PUT', `/api/students/${t.b}/target`, goodTarget)).status).toBe(409);
+    expect((await t.call('PUT', `/api/students/${t.a}/handover`, { to: null })).status).toBe(200);
+    expect((await t.call('PUT', `/api/students/${t.b}/target`, goodTarget)).status).toBe(200);
+    await t.service.stopAll();
+  });
+
+  test('非法请求：400 / 404 / 409 带可读原因', async () => {
+    const t = await two();
+    expect((await t.call('PUT', `/api/students/${t.a}/handover`, { to: 'x' })).status).toBe(400);
+    expect((await t.call('PUT', `/api/students/999/handover`, { to: t.b })).status).toBe(404);
+    const same = await t.call('PUT', `/api/students/${t.a}/handover`, { to: t.a });
+    expect(same.status).toBe(409);
+    expect(render('zh', ((await same.json()) as { error: never }).error)).toContain('不能让给自己');
+    // 一对一、不串联：A→B 之后，B→A 被拒绝
+    expect((await t.call('PUT', `/api/students/${t.a}/handover`, { to: t.b })).status).toBe(200);
+    const back = await t.call('PUT', `/api/students/${t.b}/handover`, { to: t.a });
+    expect(back.status).toBe(409);
+    expect(((await back.json()) as { result: string }).result).toBe('taken');
+    await t.service.stopAll();
   });
 });

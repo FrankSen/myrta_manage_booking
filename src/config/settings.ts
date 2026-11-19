@@ -23,20 +23,30 @@ export interface Settings {
   autoRebookEnabled: boolean;
   /** 界面语言，教练在顶栏切换，写回 settings.json 的 ui.language */
   language: Lang;
+  /** 消息推送。配了飞书机器人 Webhook 地址后，重要消息（找到、改约成功、出错等）会推到群里 */
+  notify: NotifySettings;
+}
+
+export interface NotifySettings {
+  /** 飞书自定义机器人 Webhook 地址；空串表示不推送 */
+  feishuWebhook: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
   hidden: {
     maxActiveStudents: 5,
-    checkIntervalMs: 2 * 60_000,
+    // 2026-11-17 教练要求大幅调快抢考位：默认 5 秒一轮，忽略被拦/封 IP 风险
+    checkIntervalMs: 5_000,
     jitterRatio: 0.2,
-    globalMinGapMs: 20_000,
+    // 全局最小访问间隔随之调小，否则 4-5 个学员排队会被这里卡住、达不到 5 秒节奏
+    globalMinGapMs: 2_000,
     backoffBaseMs: 5 * 60_000,
     backoffMaxMs: 60 * 60_000,
   },
   tolerance: { maxTimeMinutes: 60, maxDateDays: 0 },
   autoRebookEnabled: false,
   language: DEFAULT_LANG,
+  notify: { feishuWebhook: '' },
 };
 
 /** 用文件里的值覆盖默认值，只接受已知字段，类型不对就报错 */
@@ -57,6 +67,12 @@ export function mergeSettings(base: Settings, override: unknown): Settings {
   }
   const ui = o.ui as Record<string, unknown> | undefined;
   if (ui?.language !== undefined && !isLang(ui.language)) throw new Error('配置 ui.language 只能是 zh 或 en');
+  const n = o.notify as Record<string, unknown> | undefined;
+  let feishuWebhook = base.notify.feishuWebhook;
+  if (n?.feishuWebhook !== undefined) {
+    if (typeof n.feishuWebhook !== 'string') throw new Error('配置 notify.feishuWebhook 必须是字符串');
+    feishuWebhook = n.feishuWebhook.trim();
+  }
   return {
     language: (ui?.language as Lang | undefined) ?? base.language,
     hidden: {
@@ -72,5 +88,6 @@ export function mergeSettings(base: Settings, override: unknown): Settings {
       maxDateDays: num('tolerance', t, 'maxDateDays', base.tolerance.maxDateDays),
     },
     autoRebookEnabled: (o.autoRebookEnabled as boolean | undefined) ?? base.autoRebookEnabled,
+    notify: { feishuWebhook },
   };
 }

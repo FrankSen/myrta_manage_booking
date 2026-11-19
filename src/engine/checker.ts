@@ -42,6 +42,8 @@ export interface CheckDeps {
   tolerance: Tolerance;
   centres: CentreIndex;
   autoRebookEnabled: boolean;
+  /** 这个学员是否自动提交（点 Finish），即使全局自动改约关闭。让位的双方是 */
+  autoSubmit?: (studentId: number) => boolean;
   notify(event: NotifyEvent): void;
   state: CheckState;
   /** 报告本轮正在做什么，界面显示用 */
@@ -184,7 +186,7 @@ export async function rebookSlot(student: Student, slot: Slot, session: SiteSess
     );
   }
 
-  if (!deps.autoRebookEnabled) {
+  if (!deps.autoRebookEnabled && !deps.autoSubmit?.(student.id)) {
     repo.setStatus(student.id, 'pending_confirm', msg('status.at_confirm', where));
     repo.log(student.id, 'info', msg('log.exact_dry_run', where), clock.now());
     deps.notify({ type: 'dry_run_ready', studentId: student.id, slot });

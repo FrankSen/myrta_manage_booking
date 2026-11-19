@@ -47,6 +47,8 @@ export function migrate(db: DatabaseSync): void {
   add('rounds', 'INTEGER NOT NULL DEFAULT 0');
   add('last_round_at', 'INTEGER');
   add('interval_ms', 'INTEGER');
+  // 让位：这个学员（A）的原考位放出后，由哪个学员（B）去抢。空表示没有让位
+  add('handover_to', 'INTEGER');
 }
 
 /** 打开（必要时创建）数据库。':memory:' 用于测试 */

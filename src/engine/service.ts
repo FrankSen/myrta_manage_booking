@@ -56,6 +56,14 @@ export const HOLD_MS = 10 * 60_000;
 export type HoldResult = 'rebooked' | 'resumed' | 'unchanged' | 'changed' | 'unknown' | 'not_held';
 export type HoldEnd = 'abandon' | 'submitted' | 'timeout';
 
+/**
+ * 设置让位的结果。ok：已设好（双方开始刷新）；no_student：学员不存在；same：不能让给自己；
+ * done：有一方已经改约完成；taken：一对一，有一方已经在别的让位里；no_target：A 还没设目标；
+ * unknown_centre：A 的考点不在考点列表里；not_bookable：A 的考位 48 小时内，网站不让改；
+ * held：有一方停在确认页，先处理
+ */
+export type HandoverResult = 'ok' | 'no_student' | 'same' | 'done' | 'taken' | 'no_target' | 'unknown_centre' | 'not_bookable' | 'held';
+
 /** 原考位放出后，过多久再补查一次（站点放回考位可能有延迟） */
 export const RELEASE_RECHECK_MS = 60_000;
 
@@ -84,9 +92,14 @@ export class Service {
   /** 每个学员当前这次操作（一轮检查、确认考位）的中断器。暂停时用它立刻停下 */
   private readonly ops = new Map<number, AbortController>();
   private globalIntervalMs: number;
+  private readonly notify: (e: NotifyEvent) => void;
 
   constructor(deps: ServiceDeps) {
     this.deps = deps;
+    this.notify = (e) => {
+      this.onEvent(e);
+      deps.notify(e);
+    };
     this.globalIntervalMs = deps.settings.hidden.checkIntervalMs;
     this.scheduler = new Scheduler(deps.clock, deps.settings.hidden, (id) => this.runCheck(id), deps.random, (id) => this.intervalFor(id));
   }
@@ -246,8 +259,20 @@ export class Service {
       const s = id !== fromId && !this.holds.has(id) ? repo.getStudent(id) : undefined;
       return !!s && s.status === 'running' && evaluate(slot, s.target, this.deps.settings.tolerance, centres, clock.now()).kind === 'exact';
     };
-    const ids = this.scheduler.activeIds().filter(wants);
+    // 让位：A 指定的 B 还没在刷新（比如被暂停了）时先启动它，启动后马上就会查一轮
+    const started = new Set<number>();
+    const toId = repo.getStudent(fromId)?.handoverTo ?? null;
+    const to = toId === null ? undefined : repo.getStudent(toId);
+    if (to && to.status !== 'done' && evaluate(slot, to.target, this.deps.settings.tolerance, centres, clock.now()).kind === 'exact') {
+      repo.log(to.id, 'info', msg('log.handover_released', { who, centre: centre.name, date: old.date, time: old.time }), clock.now());
+      if (!this.scheduler.activeIds().includes(to.id) && !this.holds.has(to.id) && this.startStudent(to.id, true)) started.add(to.id);
+    }
+    const ids = this.scheduler.activeIds().filter((id) => wants(id) && !started.has(id));
     for (const id of ids) {
+      if (id === toId) {
+        this.scheduler.runNow(id);
+        continue;
+      }
       repo.log(id, 'info', msg('log.released_check', { who, centre: centre.name, date: old.date, time: old.time }), clock.now());
       this.scheduler.runNow(id);
     }
@@ -259,7 +284,56 @@ export class Service {
         () => {},
       );
     }
-    return ids;
+    return [...started, ...ids];
+  }
+
+  /**
+   * 设置让位：A（fromId）改约后，原考位由 B（toId）去抢。一对一。
+   * B 的目标固定为 A 现在的考位（考点、日期、时间完全一致），不用另外设置；A 用它自己的目标找新考位。
+   * 双方都自动提交（点 Finish），设好后双方开始刷新。toId 为 null 时解除
+   */
+  setHandover(fromId: number, toId: number | null): HandoverResult {
+    const { repo, clock, centres } = this.deps;
+    const a = repo.getStudent(fromId);
+    if (!a) return 'no_student';
+    if (toId === null) {
+      const old = a.handoverTo === null ? undefined : repo.getStudent(a.handoverTo);
+      if (a.handoverTo !== null) {
+        repo.setHandover(fromId, null);
+        repo.log(fromId, 'info', msg('log.handover_cleared', { who: old?.label ?? '' }), clock.now());
+      }
+      return 'ok';
+    }
+    const b = repo.getStudent(toId);
+    if (!b) return 'no_student';
+    if (fromId === toId) return 'same';
+    if (a.status === 'done' || b.status === 'done') return 'done';
+    // 一对一，也不串联（A 不能同时在接别人的让位，B 不能同时在让给别人）
+    const bFrom = repo.handoverFrom(toId);
+    if ((bFrom && bFrom.id !== fromId) || b.handoverTo !== null || repo.handoverFrom(fromId) || (a.handoverTo !== null && a.handoverTo !== toId)) return 'taken';
+    if (a.target.centreIds.length === 0) return 'no_target';
+    const name = a.current.centreName.trim().toLowerCase();
+    const centre = [...centres.values()].find((c) => c.name.trim().toLowerCase() === name);
+    if (!centre) return 'unknown_centre';
+    if (!isBookable({ centreId: centre.id, date: a.current.date, time: a.current.time }, clock.now())) return 'not_bookable';
+    if (this.holds.has(fromId) || this.holds.has(toId)) return 'held';
+
+    const t = a.current.time;
+    repo.updateTarget(toId, { centreIds: [centre.id], dateFrom: a.current.date, dateTo: a.current.date, timeFrom: t, timeTo: t, times: [t] });
+    repo.setHandover(fromId, toId);
+    const where = { centre: centre.name, date: a.current.date, time: t };
+    repo.log(fromId, 'info', msg('log.handover_set_from', { who: b.label, ...where }), clock.now());
+    repo.log(toId, 'info', msg('log.handover_set_to', { who: a.label, ...where }), clock.now());
+    // B 刚换了目标：正在刷新的话下一轮就按新目标查
+    this.startStudent(fromId);
+    this.startStudent(toId);
+    return 'ok';
+  }
+
+  /** 让位的双方自动提交（点 Finish），即使全局自动改约关闭 */
+  autoSubmit(id: number): boolean {
+    const s = this.deps.repo.getStudent(id);
+    return !!s && (s.handoverTo !== null || !!this.deps.repo.handoverFrom(id));
   }
 
   /** 停在确认页的学员：所选考位和保留到什么时候 */
@@ -290,6 +364,17 @@ export class Service {
   }
 
   // ---- 内部 ----
+
+  /** B 抢到了 A 让出的考位：让位完成，解除 */
+  private onEvent(e: NotifyEvent): void {
+    if (e.type !== 'rebooked') return;
+    const { repo, clock } = this.deps;
+    const a = repo.handoverFrom(e.studentId);
+    if (!a) return;
+    repo.setHandover(a.id, null);
+    const b = repo.getStudent(e.studentId);
+    repo.log(a.id, 'info', msg('log.handover_done', { who: b?.label ?? '' }), clock.now());
+  }
 
   private async startHold(id: number, slot: Slot): Promise<void> {
     const cancel = new AbortController();
@@ -341,7 +426,7 @@ export class Service {
         const note = msg('status.hold_unknown', where);
         repo.setStatus(id, 'paused', note);
         repo.log(id, 'error', note, clock.now());
-        this.deps.notify({ type: 'error', studentId: id, kind: 'finish_unverified', message: note });
+        this.notify({ type: 'error', studentId: id, kind: 'finish_unverified', message: note });
         return 'unknown';
       }
     } else if (sameBooking(after, { centreName: centre, ...h.slot })) {
@@ -349,7 +434,7 @@ export class Service {
       const to = { centre: after.centreName, date: after.date, time: after.time };
       repo.setStatus(id, 'done', msg('status.rebooked', to));
       repo.log(id, 'info', msg('log.rebooked', to), clock.now());
-      this.deps.notify({ type: 'rebooked', studentId: id, to: after });
+      this.notify({ type: 'rebooked', studentId: id, to: after });
       this.released(id, student.current);
       await this.dropSession(id);
       return 'rebooked';
@@ -401,7 +486,8 @@ export class Service {
       tolerance: d.settings.tolerance,
       centres: d.centres,
       autoRebookEnabled: d.settings.autoRebookEnabled,
-      notify: (e) => d.notify(e),
+      notify: (e) => this.notify(e),
+      autoSubmit: (id) => this.autoSubmit(id),
       state: this.state,
       onPhase: (id, p) => this.phases.set(id, p),
       onConfirmReady: (id, slot) => this.startHold(id, slot),

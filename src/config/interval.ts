@@ -1,12 +1,17 @@
 import { msg } from '../i18n.ts';
 
-/** 界面上可选的刷新间隔（分钟）。最小 1 分钟，原因见 INTERVAL_HELP */
-export const INTERVAL_CHOICES_MIN = [1, 2, 3, 5, 10, 15, 30] as const;
+/**
+ * 界面上可选的刷新间隔（毫秒）。最快 5 秒：2026-11-17 教练要求大幅调快以抢考位，
+ * 明确忽略被站点拦截/封 IP 的风险（由教练自行更换出口 IP 解决），原因与取舍见 INTERVAL_HELP。
+ */
+export const INTERVAL_CHOICES_MS = [
+  5_000, 10_000, 30_000, 60_000, 2 * 60_000, 3 * 60_000, 5 * 60_000, 10 * 60_000, 15 * 60_000, 30 * 60_000,
+] as const;
 
-export const MIN_INTERVAL_MS = INTERVAL_CHOICES_MIN[0] * 60_000;
+export const MIN_INTERVAL_MS = INTERVAL_CHOICES_MS[0];
 
 export function isAllowedInterval(ms: number): boolean {
-  return (INTERVAL_CHOICES_MIN as readonly number[]).includes(ms / 60_000);
+  return (INTERVAL_CHOICES_MS as readonly number[]).includes(ms);
 }
 
 /** 给教练看的说明。数字来自 2026-11 实测，见实现计划"实测耗时" */

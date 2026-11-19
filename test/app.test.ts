@@ -410,3 +410,21 @@ describe('界面语言', () => {
     expect([s.hidden.maxActiveStudents, s.hidden.checkIntervalMs, s.language]).toEqual([3, 5 * 60_000, 'en']);
   });
 });
+
+describe('飞书通知设置', () => {
+  const hook = 'https://open.feishu.cn/open-apis/bot/v2/hook/abc123';
+  test('界面设置 Webhook 后写回 settings.json，restart 后 state 里还在', async () => {
+    const d = dir();
+    const start = () => startApp({ runtimeDir: d, centresFile, openWindow: () => null, openSession: async () => new FakeSession() });
+    app = await start();
+    const call = (method: string, path: string, b?: unknown) =>
+      fetch(`http://127.0.0.1:${app!.ui.port}${path}`, { method, headers: { 'X-Token': app!.ui.token, 'Content-Type': 'application/json' }, body: b === undefined ? undefined : JSON.stringify(b) });
+    expect(((await (await call('GET', '/api/state')).json()) as { feishuWebhook: string }).feishuWebhook).toBe('');
+    expect((await call('PUT', '/api/settings/feishu', { webhook: 'https://evil.com/x' })).status).toBe(400);
+    expect((await call('PUT', '/api/settings/feishu', { webhook: hook })).status).toBe(200);
+    expect(loadSettings(join(d, 'settings.json')).notify.feishuWebhook).toBe(hook);
+    await app.stop();
+    app = await start();
+    expect(((await (await call('GET', '/api/state')).json()) as { feishuWebhook: string }).feishuWebhook).toBe(hook);
+  });
+});

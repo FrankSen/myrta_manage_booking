@@ -13,9 +13,10 @@ import { Repo } from '../storage/repo.ts';
 import { startUiServer, type UiServer } from '../ui/server.ts';
 import { acquireLock } from './lock.ts';
 import { LicenseGate } from '../license/gate.ts';
-import { TextError, msg, render, type Lang, type Text } from '../i18n.ts';
+import { TextError, errorText, msg, render, type Lang, type Text } from '../i18n.ts';
 import { runtimePaths } from './paths.ts';
-import { loadSettings, saveCheckInterval, saveLanguage } from './settings-file.ts';
+import { loadSettings, saveCheckInterval, saveLanguage, saveFeishuWebhook } from './settings-file.ts';
+import { createFeishuPusher } from '../notify/feishu.ts';
 
 export interface AppOptions {
   /** 启动时和退出时结束遗留的学员浏览器（上次软件被强行结束时留下的）。正式运行时打开，测试不用 */
@@ -114,6 +115,13 @@ export async function startApp(opts: AppOptions): Promise<App> {
     });
     let ui: UiServer | null = null;
     let language: Lang = settings.language;
+    // 飞书推送：配了 Webhook 才推。地址可在界面改，改后写回 settings.json 并用新值
+    let feishuWebhook = settings.notify.feishuWebhook;
+    const feishu = createFeishuPusher({
+      webhook: () => feishuWebhook,
+      lang: () => language,
+      onError: (err) => repo.log(null, 'warn', msg('log.feishu_failed', { detail: errorText(err) }), clock.now()),
+    });
     const service = new Service({
       repo, clock, limiter, settings, centres,
       openSession: (id) => opts.openSession(id, `${paths.browserProfiles}/${id}`),
@@ -138,6 +146,14 @@ export async function startApp(opts: AppOptions): Promise<App> {
         autoRebookEnabled: settings.autoRebookEnabled,
         maxDateDays: settings.tolerance.maxDateDays,
         now: () => clock.now(),
+        pushMessage: (m) => feishu.push(m),
+        feishu: {
+          get: () => feishuWebhook,
+          set: (url) => {
+            feishuWebhook = url;
+            saveFeishuWebhook(paths.settings, url);
+          },
+        },
         // 临时读取共用一个 probe 目录，同一目录不能同时开两个浏览器，所以排队执行
         cancelFetch: () => {
           probeCancel?.abort();

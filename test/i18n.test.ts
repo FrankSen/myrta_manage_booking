@@ -41,8 +41,8 @@ describe('翻译', () => {
     const m = msg('log.stopped', { reason: msg('stop.locked') });
     expect(render('zh', m)).toBe('停止：原考试距现在不足 48 小时，预约已锁定，不能再改');
     expect(render('en', m)).toBe('Stopped: The current test is less than 48 hours away, so the booking is locked');
-    expect(t('zh', 'v.interval', { list: ['1', '2'] })).toBe('刷新间隔只能选 1、2 分钟');
-    expect(t('en', 'v.interval', { list: ['1', '2'] })).toBe('The interval must be one of 1, 2 minutes');
+    expect(t('zh', 'v.interval', { list: ['5', '10'] })).toBe('刷新间隔只能选 5、10 秒');
+    expect(t('en', 'v.interval', { list: ['5', '10'] })).toBe('The interval must be one of 5, 10 seconds');
   });
   test('普通字符串（旧数据、站点原文）原样显示', () => {
     expect(render('en', '资料不符')).toBe('资料不符');

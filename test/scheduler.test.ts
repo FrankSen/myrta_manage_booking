@@ -87,9 +87,11 @@ describe('Limiter', () => {
 });
 
 describe('Scheduler', () => {
+  // 调度行为用固定间隔测试，与生产默认值解耦（默认已改为 5 秒）
+  const SCHED_INTERVAL = 2 * MIN;
   const mk = (run: (id: number) => Promise<void>, random = () => 0.5) => {
     const clock = new FakeClock(0);
-    return { clock, sch: new Scheduler(clock, H, run, random) };
+    return { clock, sch: new Scheduler(clock, H, run, random, () => SCHED_INTERVAL) };
   };
 
   test('start 立刻跑第一轮，之后约每 2 分钟一轮', async () => {
@@ -116,7 +118,7 @@ describe('Scheduler', () => {
     for (const [rnd, expected] of [[0, 96_000], [1, 144_000]] as const) {
       const calls: number[] = [];
       const clock = new FakeClock(0);
-      const sch = new Scheduler(clock, H, async () => void calls.push(clock.now()), () => rnd);
+      const sch = new Scheduler(clock, H, async () => void calls.push(clock.now()), () => rnd, () => 2 * MIN);
       sch.start(1);
       await clock.advance(expected);
       expect(calls).toEqual([0, expected]);
@@ -207,7 +209,7 @@ describe('Scheduler：间隔可调与运行信息', () => {
   test('info：正在跑时 running 为 true；等待时给出下一轮时刻', async () => {
     let release!: () => void;
     const clock = new FakeClock(0);
-    const sch = new Scheduler(clock, H, () => new Promise<void>((r) => (release = r)), () => 0.5);
+    const sch = new Scheduler(clock, H, () => new Promise<void>((r) => (release = r)), () => 0.5, () => 2 * MIN);
     expect(sch.info(1)).toBeNull();
     sch.start(1);
     await clock.advance(0);

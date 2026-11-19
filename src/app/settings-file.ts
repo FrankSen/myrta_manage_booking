@@ -20,7 +20,7 @@ function readRaw(path: string): Record<string, unknown> {
 }
 
 /** 改配置文件里的一组值，保留文件里的其他内容。先写临时文件再改名，中途断电也不会写坏 */
-function patch(path: string, group: 'hidden' | 'ui', values: Record<string, unknown>): void {
+function patch(path: string, group: 'hidden' | 'ui' | 'notify', values: Record<string, unknown>): void {
   const raw = existsSync(path) ? readRaw(path) : {};
   const old = (raw[group] && typeof raw[group] === 'object' ? raw[group] : {}) as Record<string, unknown>;
   raw[group] = { ...old, ...values };
@@ -38,4 +38,9 @@ export function saveCheckInterval(path: string, ms: number): void {
 /** 把界面语言写回配置文件 */
 export function saveLanguage(path: string, language: string): void {
   patch(path, 'ui', { language });
+}
+
+/** 把飞书 Webhook 地址写回配置文件 */
+export function saveFeishuWebhook(path: string, feishuWebhook: string): void {
+  patch(path, 'notify', { feishuWebhook });
 }

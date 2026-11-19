@@ -1,4 +1,4 @@
-import { INTERVAL_CHOICES_MIN, isAllowedInterval } from '../config/interval.ts';
+import { INTERVAL_CHOICES_MS, isAllowedInterval } from '../config/interval.ts';
 import type { Target } from '../domain/types.ts';
 import { TextError, msg } from '../i18n.ts';
 
@@ -77,7 +77,7 @@ export function parseInterval(raw: unknown, allowNull: boolean): number | null {
   const ms = raw && typeof raw === 'object' ? (raw as Record<string, unknown>).ms : undefined;
   if (ms === null && allowNull) return null;
   if (typeof ms !== 'number' || !isAllowedInterval(ms)) {
-    throw new ValidationError(msg('v.interval', { list: INTERVAL_CHOICES_MIN.map(String) }));
+    throw new ValidationError(msg('v.interval', { list: INTERVAL_CHOICES_MS.map((m) => String(m / 1000)) }));
   }
   return ms;
 }

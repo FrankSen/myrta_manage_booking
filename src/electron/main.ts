@@ -49,7 +49,8 @@ async function boot(): Promise<void> {
     core = await startApp({
       runtimeDir: dataDir,
       centresFile: join(root, 'data', 'nsw-test-centres.json'),
-      openSession: async (_id, profileDir) => new BrowserSession({ profileDir, allowFinish: false }),
+      // 提交只用于设置了让位的双方；全局自动改约仍强制关闭（finishAvailable: false）。见 src/main.ts
+      openSession: async (_id, profileDir) => new BrowserSession({ profileDir, allowFinish: true }),
       cleanupBrowsers: (root) => cleanupOrphans(root),
       finishAvailable: false,
       requireLicense: true,

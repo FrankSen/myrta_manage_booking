@@ -23,16 +23,20 @@ describe('remaining', () => {
 
 describe('estimate', () => {
   test('2 分钟：实际约 3.1 到 3.8 分钟一轮', () => {
-    expect(estimate(2).text).toBe('实际约 3.1 到 3.8 分钟一轮，每小时约 16 到 19 轮');
-    expect(estimate(2).risky).toBe(false);
+    expect(estimate(2 * 60_000).text).toBe('实际约 3.1 到 3.8 分钟一轮，每小时约 16 到 19 轮');
+    expect(estimate(2 * 60_000).risky).toBe(false);
   });
-  test('1 分钟标为有风险', () => expect(estimate(1).risky).toBe(true));
+  test('不到 1 分钟标为有风险', () => {
+    expect(estimate(60_000).risky).toBe(false);
+    expect(estimate(5_000).risky).toBe(true);
+  });
 });
 
 describe('cycleLabel', () => {
-  test('按半分钟取整', () => {
+  test('不到 1 分钟按秒，否则按半分钟取整', () => {
     expect(cycleLabel(5 * 60_000)).toBe('5 分钟');
     expect(cycleLabel(205_000)).toBe('3.5 分钟');
-    expect(cycleLabel(10_000)).toBe('0.5 分钟');
+    expect(cycleLabel(10_000)).toBe('10 秒');
+    expect(cycleLabel(5_000)).toBe('5 秒');
   });
 });

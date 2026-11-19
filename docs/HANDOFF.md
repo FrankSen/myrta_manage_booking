@@ -116,6 +116,18 @@
 - 暂停：以前只停调度，正在跑的这一轮要等跑完（浏览器还在查），教练手动关浏览器后记成"页面加载超时"。现在每次操作有自己的中断器（`Service.ops`），暂停时中断并立刻关浏览器，不记错误、不算轮数。
 - 浏览器被手动关掉（Playwright "has been closed"）：记一条"浏览器窗口被关闭"，下一轮重新打开，不计入连续失败。`errorText` 只取报错第一行，去掉终端颜色码。
 
+## 2026-11-19 会议结论落地：5 秒刷新、飞书推送、跳过首页、让位（软件替 A 改约）
+
+- 刷新间隔改为毫秒档位（5/10/30 秒、1–30 分钟），默认 5 秒；全局最小访问间隔 20 秒 → 2 秒。教练接受被拦风险，被封 IP 时换路由器出口 IP。
+- 飞书推送：`src/notify/feishu.ts`，只推 attention 级消息，只认 `https://open.feishu.cn/open-apis/bot/` 地址；界面顶栏"飞书通知"配置，存 `settings.json` 的 `notify.feishuWebhook`。地址不写死在代码里。
+- Manage booking 深链接按首页地址缓存（`cachedManageHref`），后续会话直接跳转；失效回退首页。**未联网验证。**
+- `BrowserSession.finish()` 已实现：选 `#existingPhone` → 勾 `#checkTerms` → 点 Finish（`#finishButton`，或文字为 Finish 的按钮）→ 识别完成页（"Finish in progress"/Step 5）成功；回到选时间页或"no longer available"为 failed；仍在确认页且有新提示则报错带原话。`readCurrent()` 在完成页回不到预约页时用最近一次登录资料重新登录。
+- **Finish 按钮和完成页是猜的**，只在本地假网站（`test/helpers/mock-myrta.ts`）上验证。安全网：引擎提交后一律用 `readCurrent` 核实，读到新考位才算成功，否则暂停报警（`finish_unverified`）。
+- 让位（`Service.setHandover`，`PUT /api/students/:id/handover`，库字段 `students.handover_to`）：一对一、不串联；B 的目标自动设为 A 当前考位且锁定；双方 `autoSubmit` 为真，即使全局自动改约关闭也点 Finish；`released()` 对 B 特殊处理（暂停了就启动）；B 改约成功后自动解除；删除 B 时清掉 A 的让位。
+- 生产入口 `allowFinish: true`，但 `finishAvailable: false` 仍强制关闭全局自动改约——**只有让位双方会真正提交**。
+- 测试：`npm test`（含 `test/handover.test.ts`，共享假网站的引擎测试）；`npm run test:e2e`（真实 Chrome + 假网站：BrowserSession 全流程、A→B 让位全流程，约 2.5 分钟）。
+- **第一次真实提交**：教练在场、用不怕改的预约（48 小时以外）。核对确认页的电话选项/条款/Finish 按钮选择器和完成页文字，按实际修改 `flow.ts` 和 `mock-myrta.ts`。
+
 ## 下一步（按顺序）
 
 1. **在真实 Windows 上走一遍**：解压 zip，双击 `MyRTA Rebook.exe`，看 SmartScreen 提示、快捷方式、中文显示（英文 Windows 也要看）、能找到 Chrome/Edge、添加学员能读到预约、关窗口后浏览器都关了、iOA 弹窗是否减少。

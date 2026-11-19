@@ -19,7 +19,9 @@ function setup(settings: Partial<Settings> = {}, allowed?: () => boolean) {
   const sessions = new Map<number, FakeSession>();
   const events: NotifyEvent[] = [];
   const limiter = { acquire: async () => {}, reportBlocked: () => 5 * MIN, reportOk: () => {} };
-  const merged: Settings = { ...DEFAULT_SETTINGS, ...settings, hidden: { ...DEFAULT_SETTINGS.hidden, ...(settings.hidden ?? {}) } };
+  // 这组测试验证调度/排队数学，与生产默认值解耦：固定 2 分钟间隔、全局 20 秒间隔（默认已改为 5 秒 / 2 秒）
+  const testHidden = { ...DEFAULT_SETTINGS.hidden, checkIntervalMs: 2 * MIN, globalMinGapMs: 20_000 };
+  const merged: Settings = { ...DEFAULT_SETTINGS, ...settings, hidden: { ...testHidden, ...(settings.hidden ?? {}) } };
   const service = new Service({
     repo, clock, limiter, settings: merged, centres,
     openSession: async (id) => {
@@ -411,7 +413,7 @@ describe('预计刷新周期', () => {
   });
 
   test('没在刷新的学员按"加上它之后"估算', () => {
-    const t = setup({ hidden: { ...DEFAULT_SETTINGS.hidden, checkIntervalMs: MIN } });
+    const t = setup({ hidden: { ...DEFAULT_SETTINGS.hidden, checkIntervalMs: MIN, globalMinGapMs: 20_000 } });
     const a = t.addStudent('A');
     const b = t.addStudent('B');
     t.service.startStudent(a);

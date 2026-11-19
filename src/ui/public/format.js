@@ -22,23 +22,31 @@ export function remaining(ms, lang = 'zh') {
 /** 一轮本身要多久（秒），实测值：回到预约页约 15 秒，每个考点 25 到 45 秒，每轮至少 2 个考点 */
 export const ROUND_SEC = { min: 15 + 2 * 25, max: 15 + 2 * 45 };
 
-/** 选某个间隔时，实际多久一轮、每小时大约几轮 */
-export function estimate(intervalMin, lang = 'zh') {
-  const lo = intervalMin * 60 + ROUND_SEC.min;
-  const hi = intervalMin * 60 + ROUND_SEC.max;
-  const fmt = (sec) => (sec % 60 === 0 ? `${sec / 60}` : (sec / 60).toFixed(1));
-  return {
-    text: t(lang, 'interval.estimate', { lo: fmt(lo), hi: fmt(hi), rlo: Math.round(3600 / hi), rhi: Math.round(3600 / lo) }),
-    risky: intervalMin <= 1,
-  };
-}
-
-/** 预计刷新周期：半分钟取整，如 3、3.5 分钟 */
-export function cycleLabel(ms, lang = 'zh') {
+/** 时长标签：不到 1 分钟按秒，否则按分钟（半分钟取整） */
+export function durLabel(ms, lang = 'zh') {
+  if (ms < 60_000) return t(lang, 'dur.seconds', { n: Math.max(1, Math.round(ms / 1000)) });
   const half = Math.max(1, Math.round(ms / 30_000));
   return t(lang, 'dur.minutes', { n: half % 2 === 0 ? half / 2 : (half / 2).toFixed(1) });
 }
 
+/** 选某个间隔时，实际多久一轮、每小时大约几轮。intervalMs 为毫秒 */
+export function estimate(intervalMs, lang = 'zh') {
+  const intervalSec = intervalMs / 1000;
+  const lo = intervalSec + ROUND_SEC.min;
+  const hi = intervalSec + ROUND_SEC.max;
+  const fmt = (sec) => (sec % 60 === 0 ? `${sec / 60}` : (sec / 60).toFixed(1));
+  return {
+    text: t(lang, 'interval.estimate', { lo: fmt(lo), hi: fmt(hi), rlo: Math.round(3600 / hi), rhi: Math.round(3600 / lo) }),
+    // 最快的几个档（不到 1 分钟）被拦风险最大
+    risky: intervalMs < 60_000,
+  };
+}
+
+/** 预计刷新周期：半分钟取整，如 3、3.5 分钟；不到 1 分钟按秒 */
+export function cycleLabel(ms, lang = 'zh') {
+  return durLabel(ms, lang);
+}
+
 export function minutesLabel(ms, lang = 'zh') {
-  return t(lang, 'dur.minutes', { n: Math.round(ms / 60_000) });
+  return durLabel(ms, lang);
 }

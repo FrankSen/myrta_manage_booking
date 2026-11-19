@@ -23,6 +23,8 @@ export interface Student {
   lastRoundAt: number | null;
   /** 单独设置的刷新间隔（毫秒）；null 表示用全局设置 */
   intervalMs: number | null;
+  /** 让位给哪个学员：这个学员改约后，原考位由他去抢。null 表示没有让位 */
+  handoverTo: number | null;
 }
 
 export interface Offer {
@@ -54,7 +56,7 @@ export class Repo {
     this.key = key;
   }
 
-  addStudent(s: Omit<Student, 'id' | 'status' | 'statusNote' | 'rounds' | 'lastRoundAt' | 'intervalMs'>): number {
+  addStudent(s: Omit<Student, 'id' | 'status' | 'statusNote' | 'rounds' | 'lastRoundAt' | 'intervalMs' | 'handoverTo'>): number {
     const r = this.db
       .prepare(
         `INSERT INTO students (label, booking_id_enc, surname_enc, current_json, target_json)
@@ -97,7 +99,18 @@ export class Repo {
     this.db.prepare('UPDATE students SET interval_ms = ? WHERE id = ?').run(ms, id);
   }
 
+  setHandover(id: number, to: number | null): void {
+    this.db.prepare('UPDATE students SET handover_to = ? WHERE id = ?').run(to, id);
+  }
+
+  /** 让位给 id 的学员（A）。一对一，最多一个 */
+  handoverFrom(id: number): Student | undefined {
+    const row = this.db.prepare('SELECT * FROM students WHERE handover_to = ? ORDER BY id LIMIT 1').get(id) as Row | undefined;
+    return row ? this.toStudent(row) : undefined;
+  }
+
   deleteStudent(id: number): void {
+    this.db.prepare('UPDATE students SET handover_to = NULL WHERE handover_to = ?').run(id);
     this.db.prepare('DELETE FROM students WHERE id = ?').run(id);
   }
 
@@ -161,6 +174,7 @@ export class Repo {
       rounds: (r.rounds as number | null) ?? 0,
       lastRoundAt: (r.last_round_at as number | null) ?? null,
       intervalMs: (r.interval_ms as number | null) ?? null,
+      handoverTo: (r.handover_to as number | null) ?? null,
     };
   }
 

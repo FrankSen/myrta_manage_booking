@@ -7,10 +7,11 @@ import type { Centre } from '../domain/types.ts';
 import type { NotifyEvent } from '../engine/checker.ts';
 import type { Service } from '../engine/service.ts';
 import { describeEvent, type UiMessage } from '../notify/notifier.ts';
+import { isFeishuWebhook } from '../notify/feishu.ts';
 import type { BookingInfo } from '../domain/types.ts';
 import type { Repo, Student } from '../storage/repo.ts';
 import type { LicenseState } from '../license/license.ts';
-import { INTERVAL_CHOICES_MIN, INTERVAL_HELP } from '../config/interval.ts';
+import { INTERVAL_CHOICES_MS, INTERVAL_HELP } from '../config/interval.ts';
 import { errorText, isLang, msg, type Lang, type Text } from '../i18n.ts';
 import { DEFAULT_TOLERANCE, refreshDeadline } from '../domain/matcher.ts';
 import { MAX_CENTRES, ValidationError, parseInterval, parseNewStudent, parseTarget } from './validate.ts';
@@ -35,6 +36,10 @@ export interface UiDeps {
   language?: { get(): Lang; set(lang: Lang): void };
   /** 用系统默认浏览器打开 myrta.com，让教练手动改约。测试时替换 */
   openSite?: () => void;
+  /** 重要消息外推（飞书等）。没有时不外推 */
+  pushMessage?: (m: UiMessage) => void;
+  /** 飞书 Webhook 地址的读取和保存。没有时界面不显示该设置 */
+  feishu?: { get(): string; set(url: string): void };
 }
 
 const SITE = 'https://www.myrta.com/';
@@ -61,7 +66,7 @@ const MIME: Record<string, string> = {
 };
 
 /** 对外只给 Booking number 的末 3 位，姓氏不返回 */
-export function publicStudent(s: Student, service?: Pick<Service, 'progress' | 'intervalFor' | 'expectedCycle'> & Partial<Pick<Service, 'holdInfo'>>, maxDateDays = DEFAULT_TOLERANCE.maxDateDays) {
+export function publicStudent(s: Student, service?: Pick<Service, 'progress' | 'intervalFor' | 'expectedCycle'> & Partial<Pick<Service, 'holdInfo'>>, maxDateDays = DEFAULT_TOLERANCE.maxDateDays, repo?: Pick<Repo, 'handoverFrom'>) {
   return {
     /** 预计实际多久刷新一次（排队后），学员多、考点多时比设定间隔慢 */
     expectedCycleMs: service && s.target.centreIds.length > 0 ? service.expectedCycle(s.id) : null,
@@ -81,6 +86,10 @@ export function publicStudent(s: Student, service?: Pick<Service, 'progress' | '
     target: s.target,
     status: s.status,
     statusNote: s.statusNote,
+    /** 让位：让给哪个学员（我改约后原考位由他抢） */
+    handoverTo: s.handoverTo,
+    /** 让位：接哪个学员的考位（目标固定为他的考位，不能改） */
+    handoverFrom: repo?.handoverFrom(s.id)?.id ?? null,
   };
 }
 
@@ -131,6 +140,7 @@ export async function startUiServer(deps: UiDeps, opts: { port?: number; token?:
     const msg = describeEvent(event, deps.repo, centresById);
     recentMessages.unshift(msg);
     recentMessages.length = Math.min(recentMessages.length, 50);
+    deps.pushMessage?.(msg);
     const data = `event: message\ndata: ${JSON.stringify(msg)}\n\n`;
     for (const c of clients) c.write(data);
   };
@@ -175,7 +185,7 @@ export async function startUiServer(deps: UiDeps, opts: { port?: number; token?:
       return send(res, s.ok ? 200 : 400, s.ok ? publicLicense(s) : { error: licenseText(s.reason), license: publicLicense(s) });
     }
     // 会访问站点的操作，授权无效时一律拒绝；查看类接口照常可用
-    const needsLicense = method !== 'GET' && (/^\/api\/students(\/\d+\/start)?$/.test(path) && method === 'POST' || /^\/api\/offers\/\d+\/accept$/.test(path));
+    const needsLicense = method !== 'GET' && (/^\/api\/students(\/\d+\/start)?$/.test(path) && method === 'POST' || /^\/api\/offers\/\d+\/accept$/.test(path) || /^\/api\/students\/\d+\/handover$/.test(path) && method === 'PUT');
     if (needsLicense) {
       const s = licenseState();
       if (!s.ok) return send(res, 403, { error: licenseText(s.reason), license: publicLicense(s) });
@@ -188,15 +198,16 @@ export async function startUiServer(deps: UiDeps, opts: { port?: number; token?:
         autoRebookEnabled: deps.autoRebookEnabled,
         messages: recentMessages,
         intervalMs: deps.service.globalInterval(),
-        intervalChoicesMin: INTERVAL_CHOICES_MIN,
+        intervalChoicesMs: INTERVAL_CHOICES_MS,
         maxCentres: MAX_CENTRES,
         intervalHelp: INTERVAL_HELP,
+        feishuWebhook: deps.feishu?.get() ?? null,
         language: deps.language?.get() ?? 'zh',
         now: deps.now(),
       });
     }
     if (method === 'GET' && path === '/api/students') {
-      return send(res, 200, { now: deps.now(), backoffUntil: deps.service.backoffUntil(), students: deps.repo.listStudents().map((x) => publicStudent(x, deps.service, deps.maxDateDays)) });
+      return send(res, 200, { now: deps.now(), backoffUntil: deps.service.backoffUntil(), students: deps.repo.listStudents().map((x) => publicStudent(x, deps.service, deps.maxDateDays, deps.repo)) });
     }
     if (method === 'POST' && path === '/api/students/cancel-read') {
       deps.cancelFetch?.();
@@ -217,13 +228,15 @@ export async function startUiServer(deps: UiDeps, opts: { port?: number; token?:
         target: { centreIds: centre ? [centre.id] : [], dateFrom: current.date, dateTo: current.date, timeFrom: '08:00', timeTo: '17:00' },
       });
       deps.adoptProfile?.(id, input.bookingId);
-      return send(res, 201, publicStudent(deps.repo.getStudent(id)!, deps.service, deps.maxDateDays));
+      return send(res, 201, publicStudent(deps.repo.getStudent(id)!, deps.service, deps.maxDateDays, deps.repo));
     }
     if ((m = /^\/api\/students\/(\d+)\/target$/.exec(path)) && method === 'PUT') {
       const id = Number(m[1]);
       if (!deps.repo.getStudent(id)) return send(res, 404, { error: msg('api.no_student') });
+      // 接让位的学员，目标固定为对方的考位，先解除让位才能改
+      if (deps.repo.handoverFrom(id)) return send(res, 409, { error: msg('api.handover_target_locked') });
       deps.repo.updateTarget(id, parseTarget(await readJson(req), known));
-      return send(res, 200, publicStudent(deps.repo.getStudent(id)!, deps.service, deps.maxDateDays));
+      return send(res, 200, publicStudent(deps.repo.getStudent(id)!, deps.service, deps.maxDateDays, deps.repo));
     }
     if ((m = /^\/api\/students\/(\d+)\/(start|pause)$/.exec(path)) && method === 'POST') {
       const id = Number(m[1]);
@@ -235,13 +248,22 @@ export async function startUiServer(deps: UiDeps, opts: { port?: number; token?:
       } else {
         deps.service.pauseStudent(id);
       }
-      return send(res, 200, publicStudent(deps.repo.getStudent(id)!, deps.service, deps.maxDateDays));
+      return send(res, 200, publicStudent(deps.repo.getStudent(id)!, deps.service, deps.maxDateDays, deps.repo));
+    }
+    if ((m = /^\/api\/students\/(\d+)\/handover$/.exec(path)) && method === 'PUT') {
+      const id = Number(m[1]);
+      if (!deps.repo.getStudent(id)) return send(res, 404, { error: msg('api.no_student') });
+      const to = ((await readJson(req)) as { to?: unknown }).to;
+      if (to !== null && !(typeof to === 'number' && Number.isInteger(to))) throw new ValidationError(msg('api.handover_bad'));
+      const r = deps.service.setHandover(id, to);
+      if (r !== 'ok') return send(res, r === 'no_student' ? 404 : 409, { error: msg(`api.handover_${r}`), result: r });
+      return send(res, 200, publicStudent(deps.repo.getStudent(id)!, deps.service, deps.maxDateDays, deps.repo));
     }
     if ((m = /^\/api\/students\/(\d+)\/check-now$/.exec(path)) && method === 'POST') {
       const id = Number(m[1]);
       if (!deps.repo.getStudent(id)) return send(res, 404, { error: msg('api.no_student') });
       if (!deps.service.checkNow(id)) return send(res, 409, { error: msg('api.not_running') });
-      return send(res, 200, publicStudent(deps.repo.getStudent(id)!, deps.service, deps.maxDateDays));
+      return send(res, 200, publicStudent(deps.repo.getStudent(id)!, deps.service, deps.maxDateDays, deps.repo));
     }
     if ((m = /^\/api\/students\/(\d+)\/hold\/(abandon|submitted|reveal)$/.exec(path)) && method === 'POST') {
       const id = Number(m[1]);
@@ -277,13 +299,22 @@ export async function startUiServer(deps: UiDeps, opts: { port?: number; token?:
       const id = Number(m[1]);
       if (!deps.repo.getStudent(id)) return send(res, 404, { error: msg('api.no_student') });
       deps.service.setStudentInterval(id, parseInterval(await readJson(req), true));
-      return send(res, 200, publicStudent(deps.repo.getStudent(id)!, deps.service, deps.maxDateDays));
+      return send(res, 200, publicStudent(deps.repo.getStudent(id)!, deps.service, deps.maxDateDays, deps.repo));
     }
     if (method === 'PUT' && path === '/api/settings/language') {
       const lang = ((await readJson(req)) as { language?: unknown }).language;
       if (!isLang(lang)) throw new ValidationError(msg('api.bad_lang'));
       deps.language?.set(lang);
       return send(res, 200, { language: lang });
+    }
+    if (method === 'PUT' && path === '/api/settings/feishu') {
+      if (!deps.feishu) return send(res, 404, { error: msg('api.no_student') });
+      const raw = ((await readJson(req)) as { webhook?: unknown }).webhook;
+      const url = typeof raw === 'string' ? raw.trim() : '';
+      // 空串表示关闭推送；非空必须是飞书官方 Webhook 地址
+      if (url && !isFeishuWebhook(url)) return send(res, 400, { error: msg('v.feishu_url') });
+      deps.feishu.set(url);
+      return send(res, 200, { feishuWebhook: url });
     }
     if (method === 'POST' && path === '/api/open-site') {
       (deps.openSite ?? defaultOpenSite)();

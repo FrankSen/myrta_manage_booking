@@ -107,10 +107,21 @@ function studentActions(s) {
   }
   else if (s.status !== 'done') b.push(`<button class="primary" data-act="start">${tr(s.status === 'idle' ? 'btn.start' : 'btn.resume')}</button>`);
   if (s.status === 'pending_confirm' && !s.hold) b.push(`<button class="warn" data-act="open-site">${tr('btn.open_site')}</button>`);
-  b.push(`<button data-act="target">${tr('btn.target')}</button>`);
+  // 接让位的学员目标固定为对方的考位，不能改
+  if (s.handoverFrom === null || s.handoverFrom === undefined) b.push(`<button data-act="target">${tr('btn.target')}</button>`);
   if (s.status !== 'done') b.push(`<button data-act="interval">${tr('btn.interval')}</button>`);
+  if (s.handoverTo || s.handoverFrom) b.push(`<button data-act="handover-clear">${tr('btn.handover_clear')}</button>`);
+  else if (s.status !== 'done') b.push(`<button data-act="handover" title="${esc(tr('btn.handover_title'))}">${tr('btn.handover')}</button>`);
   b.push(`<button class="danger" data-act="delete">${tr('btn.delete')}</button>`);
   return b.join('');
+}
+
+/** 让位关系：让给谁 / 接谁的考位 */
+function handoverLine(s) {
+  const label = (id) => students.find((x) => x.id === id)?.label ?? '';
+  if (s.handoverTo) return `<div class="handover">${esc(tr('card.handover_to', { who: label(s.handoverTo) }))}</div>`;
+  if (s.handoverFrom) return `<div class="handover">${esc(tr('card.handover_from', { who: label(s.handoverFrom) }))}</div>`;
+  return '';
 }
 
 /** 刷新进度行：第几轮、下一轮倒计时、正在做什么、还能刷新多久、间隔 */
@@ -188,6 +199,7 @@ function renderStudents(list) {
         <div class="arrow">→</div>
         <div class="box goal"><div class="k">${tr('card.goal')}</div><div class="v">${esc(names)}</div><div class="s">${esc(dates)}　${esc(describeTime(t))}</div></div>
       </div>
+      ${handoverLine(s)}
       ${runLine(s)}
       ${s.statusNote ? `<div class="note">${esc(txt(s.statusNote))}</div>` : ''}
       <div class="actions">${studentActions(s)}</div></div>`;
@@ -265,9 +277,40 @@ document.addEventListener('click', async (ev) => {
       if (act === 'delete' && confirm(tr('confirm.delete', { label: s?.label ?? '' }))) await api('DELETE', `/api/students/${id}`);
       if (act === 'target') return openTarget(s);
       if (act === 'interval') return openInterval(s);
+      if (act === 'handover') return openHandover(s);
+      if (act === 'handover-clear') {
+        // 解除总是对让出方（A）操作
+        const a = s.handoverTo ? s : students.find((x) => x.id === s.handoverFrom);
+        const b = students.find((x) => x.id === (a?.handoverTo));
+        if (a && confirm(tr('confirm.handover_clear', { a: a.label, b: b?.label ?? '' }))) await api('PUT', `/api/students/${a.id}/handover`, { to: null });
+      }
     }
   } catch (e) { alert(e.message); }
   await reload();
+});
+
+// ---------- 让位 ----------
+
+let handoverFrom = null;
+function openHandover(s) {
+  handoverFrom = s;
+  // 一对一、不串联：只列出没在任何让位里、还没完成的其他学员
+  const free = students.filter((x) => x.id !== s.id && x.status !== 'done' && !x.handoverTo && !x.handoverFrom);
+  $('#handover-intro').textContent = tr('handover.intro', { who: s.label, centre: s.current.centreName, date: fmtDate(s.current.date), time: s.current.time });
+  $('#handover-to').innerHTML = free.map((x) => `<option value="${x.id}">${esc(x.label)}（Booking …${esc(x.bookingIdTail)}）</option>`).join('');
+  $('#handover-none').hidden = free.length > 0;
+  $('#handover-submit').disabled = free.length === 0;
+  $('#handover-error').textContent = '';
+  $('#dlg-handover').showModal();
+}
+$('#form-handover').addEventListener('submit', async (ev) => {
+  if (ev.submitter?.value !== 'ok') return;
+  ev.preventDefault();
+  try {
+    await api('PUT', `/api/students/${handoverFrom.id}/handover`, { to: Number($('#handover-to').value) });
+    $('#dlg-handover').close();
+    await reload();
+  } catch (e) { $('#handover-error').textContent = e.message; }
 });
 
 // ---------- 添加学员 ----------
@@ -424,7 +467,7 @@ function showEstimate() {
   const v = $('#form-interval').elements.interval.value;
   const box = $('#interval-est');
   if (v === 'global') {
-    box.textContent = tr('interval.follow_est', { min: minutesLabel(state.intervalMs), est: estimate(state.intervalMs / 60_000).text });
+    box.textContent = tr('interval.follow_est', { min: minutesLabel(state.intervalMs), est: estimate(state.intervalMs).text });
     box.className = 'interval-est';
     return;
   }
@@ -436,10 +479,11 @@ function openInterval(s) {
   intervalFor = s ?? null;
   $('#interval-title').textContent = s ? tr('interval.title_student', { label: s.label }) : tr('interval.title_global');
   $('#interval-scope').textContent = tr(s ? 'interval.scope_student' : 'interval.scope_global');
-  const current = s ? (s.intervalMs ? String(s.intervalMs / 60_000) : 'global') : String(state.intervalMs / 60_000);
-  const opts = (s ? [['global', tr('interval.follow')]] : []).concat(state.intervalChoicesMin.map((m) => [String(m), tr('dur.minutes', { n: m })]));
+  const current = s ? (s.intervalMs ? String(s.intervalMs) : 'global') : String(state.intervalMs);
+  const rec = String(5 * 60_000);
+  const opts = (s ? [['global', tr('interval.follow')]] : []).concat(state.intervalChoicesMs.map((ms) => [String(ms), minutesLabel(ms)]));
   $('#interval-choices').innerHTML = opts.map(([v, label]) =>
-    `<label><input type="radio" name="interval" value="${v}" ${v === current ? 'checked' : ''}> ${esc(label)}${v === '2' ? ` <span class="rec">${tr('interval.recommended')}</span>` : ''}</label>`).join('');
+    `<label><input type="radio" name="interval" value="${v}" ${v === current ? 'checked' : ''}> ${esc(label)}${v === rec ? ` <span class="rec">${tr('interval.recommended')}</span>` : ''}</label>`).join('');
   $('#interval-help').innerHTML = state.intervalHelp.map((p) => `<p>${esc(txt(p))}</p>`).join('');
   $('#interval-error').textContent = '';
   showEstimate();
@@ -452,9 +496,9 @@ $('#form-interval').addEventListener('submit', async (ev) => {
   ev.preventDefault();
   const v = ev.target.elements.interval.value;
   try {
-    if (intervalFor) await api('PUT', `/api/students/${intervalFor.id}/interval`, { ms: v === 'global' ? null : Number(v) * 60_000 });
+    if (intervalFor) await api('PUT', `/api/students/${intervalFor.id}/interval`, { ms: v === 'global' ? null : Number(v) });
     else {
-      const r = await api('PUT', '/api/settings/interval', { ms: Number(v) * 60_000 });
+      const r = await api('PUT', '/api/settings/interval', { ms: Number(v) });
       state.intervalMs = r.intervalMs;
       renderIntervalLabel();
     }
@@ -517,6 +561,30 @@ $('#btn-lang').onclick = async () => {
 };
 $('#btn-notify').onclick = async () => { await Notification.requestPermission(); $('#btn-notify').hidden = Notification.permission === 'granted'; };
 
+// ---------- 飞书推送设置 ----------
+function renderFeishuBtn() {
+  const btn = $('#btn-feishu');
+  // feishuWebhook 为 null 表示服务端没开启这个设置（没有 feishu 依赖），隐藏按钮
+  btn.hidden = state.feishuWebhook === null || state.feishuWebhook === undefined;
+  btn.classList.toggle('on', !!state.feishuWebhook);
+}
+$('#btn-feishu').onclick = () => {
+  $('#form-feishu').elements.webhook.value = state.feishuWebhook || '';
+  $('#feishu-error').textContent = '';
+  $('#dlg-feishu').showModal();
+};
+$('#form-feishu').addEventListener('submit', async (ev) => {
+  if (ev.submitter?.value !== 'ok') return;
+  ev.preventDefault();
+  const webhook = ev.target.elements.webhook.value.trim();
+  try {
+    const r = await api('PUT', '/api/settings/feishu', { webhook });
+    state.feishuWebhook = r.feishuWebhook;
+    renderFeishuBtn();
+    $('#dlg-feishu').close();
+  } catch (e) { $('#feishu-error').textContent = e.message; }
+});
+
 try {
   state = await api('GET', '/api/state');
   lang = state.language || DEFAULT_LANG;
@@ -524,6 +592,7 @@ try {
   centreById = new Map(state.centres.map((c) => [c.id, c]));
   renderMode();
   renderIntervalLabel();
+  renderFeishuBtn();
   renderLicense(state.license);
   $('#btn-notify').hidden = !('Notification' in window) || Notification.permission === 'granted';
   await reload();
