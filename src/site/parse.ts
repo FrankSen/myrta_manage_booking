@@ -95,6 +95,8 @@ export function detectPage(text: string, url: string): PageKind {
       return ({ '1': 'main', '2': 'choose_location', '3': 'choose_time', '4': 'confirm', '5': 'finish' } as const)[m[1] as '1'] ?? 'unknown';
     }
     if (/finish\s*in progress/i.test(text)) return 'finish';
+    // 完成页的说法还没在改约时见过；新预约的完成页是"You've successfully booked your test"
+    if (/successfully\s+(booked|changed|rebooked|updated)|booking\s+has\s+been\s+(changed|updated|confirmed)/i.test(text)) return 'finish';
   }
   return 'unknown';
 }
@@ -125,4 +127,20 @@ export function loginProblem(before: string, after: string): LoginProblem | null
 export function freshText(before: string, after: string, max = 200): string {
   const old = new Set(lines(before));
   return lines(after).filter((l) => !old.has(l)).join(' ').slice(0, max);
+}
+
+/** 选时间页 HTML 里显示的是哪一周（周一）：`<input … id="formTableWeekStarting" … value="16/11/2026">`。没有返回 null */
+export function parseWeekStarting(html: string): LocalDate | null {
+  const tag = /<input\b[^>]*\bid="formTableWeekStarting"[^>]*>/i.exec(html)?.[0];
+  const v = tag && /\bvalue="(\d{1,2})\/(\d{1,2})\/(\d{4})"/.exec(tag);
+  return v ? `${v[3]}-${v[2]!.padStart(2, '0')}-${v[1]!.padStart(2, '0')}` : null;
+}
+
+/**
+ * 选时间页 HTML 里翻周用的地址。站点的按钮脚本写成 `window.location = '/wps/…action!nextWeek==/#…'`，
+ * 每次返回的页面都带着下一步用的地址（2026-11-19 联网实测：在页面里请求它就翻一周，约 2.7 秒）
+ */
+export function weekNavUrl(html: string, dir: 'next' | 'prev'): string | null {
+  const re = dir === 'next' ? /window\.location\s*=\s*['"]([^'"#]*action!nextWeek[^'"#]*)/ : /window\.location\s*=\s*['"]([^'"#]*action!prevWeek[^'"#]*)/;
+  return re.exec(html)?.[1]?.replace(/&amp;/g, '&') ?? null;
 }

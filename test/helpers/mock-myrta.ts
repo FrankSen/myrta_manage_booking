@@ -2,9 +2,11 @@
 //
 // Step 1–4（登录、查看预约、选考点、选时间、确认页）的结构照着 2026-11 联网实测过的真实网站做：
 // URL（/tbs-change、/tbs-change-main）、"Step N in progress"、元素 id、`var timeslots` 脚本、格子 id 都一致。
-// 确认页的联系电话（existingPhone）和条款（#checkTerms）来自实现计划的记录。
-// **Finish 按钮（#finishButton）和完成页（"Finish in progress"）是猜的**，真实网站还没见过，
-// 第一次真实提交时要核对并按实际修改 flow.ts 和这里。
+// 2026-11-19 联网实测后补上的真实行为：
+//   - 选考点是表单提交后重定向到选时间页；站点记住当前看到哪个考点、哪一周（会话状态）
+//   - 翻周按钮的脚本是 `window.location = '…action!nextWeek==/#…'`，请求它站点就翻一周，再重定向回选时间页
+//   - 确认页：联系电话单选框 #rms_batCon-onFile（默认选中）、条款 #checkTerms、Finish 是 Dojo 按钮 #nextButton
+// **完成页（"Finish in progress"）是猜的**，真实网站还没见过，第一次真实提交时核对并按实际修改 flow.ts 和这里。
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { addDays, mondayOf, slotCellTime, weekdayKey } from '../../src/domain/time.ts';
@@ -52,7 +54,7 @@ export class MockMyrta {
   readonly finished: { bookingId: string; from: string; to: string }[] = [];
   /** 访问记录（路径），测试用来核对有没有走首页 */
   readonly hits: string[] = [];
-  private readonly sessions = new Map<string, string>();
+  private readonly sessions = new Map<string, { bookingId: string; centreId?: number; week?: LocalDate }>();
   private server: Server | null = null;
   url = '';
 
@@ -83,6 +85,18 @@ export class MockMyrta {
     return this.slots.get(centreId)?.has(`${date} ${time}`) ?? false;
   }
 
+  /** 模拟网站放出一个考位 */
+  add(centreId: number, date: LocalDate, time: LocalTime): void {
+    const set = this.slots.get(centreId) ?? new Set<string>();
+    set.add(`${date} ${time}`);
+    this.slots.set(centreId, set);
+  }
+
+  /** 模拟会话过期：所有登录失效 */
+  expireSessions(): void {
+    this.sessions.clear();
+  }
+
   /** 模拟别人在网站上抢走一个考位 */
   take(centreId: number, date: LocalDate, time: LocalTime): void {
     this.slots.get(centreId)?.delete(`${date} ${time}`);
@@ -95,8 +109,8 @@ export class MockMyrta {
     this.hits.push(u.pathname);
     const body = req.method === 'POST' ? new URLSearchParams(await readBody(req)) : new URLSearchParams();
     const sid = /(?:^|;\s*)sid=([^;]+)/.exec(req.headers.cookie ?? '')?.[1];
-    const who = sid ? this.sessions.get(sid) : undefined;
-    const b = who ? this.bookings.get(who) : undefined;
+    const st = sid ? this.sessions.get(sid) : undefined;
+    const b = st ? this.bookings.get(st.bookingId) : undefined;
 
     const p = u.pathname.replace(/\/+$/, '') || '/';
     if (p === '/') return html(res, page('Home', '<p>Welcome to myRTA</p><a href="/tbs-change/?lang=en">Manage booking</a>'));
@@ -107,7 +121,7 @@ export class MockMyrta {
           return html(res, loginPage('The details you have entered are incorrect, please check the details and try again or call the Contact Centre on 13 22 13.'));
         }
         const id = randomBytes(8).toString('hex');
-        this.sessions.set(id, found.bookingId);
+        this.sessions.set(id, { bookingId: found.bookingId });
         res.writeHead(303, { Location: '/tbs-change-main/', 'Set-Cookie': `sid=${id}; Path=/; HttpOnly` });
         return void res.end();
       }
@@ -124,19 +138,35 @@ export class MockMyrta {
     const sub = p.slice('/tbs-change-main'.length);
     if (sub === '') return html(res, this.mainPage(b));
     if (sub === '/location') return html(res, this.locationPage());
+    const toTime = () => {
+      res.writeHead(303, { Location: '/tbs-change-main/time' });
+      res.end();
+    };
+    if (sub === '/choose') {
+      // 选考点：站点记住考点和期望日期所在的那一周，重定向到选时间页
+      st!.centreId = Number(u.searchParams.get('locationSelect'));
+      st!.week = mondayOf(fromSite(u.searchParams.get('preferredDateStr') ?? '') ?? b.date);
+      return toTime();
+    }
+    const nav = /^\/p0\/Eaction!(nextWeek|prevWeek)==$/.exec(sub);
+    if (nav && st!.week) {
+      st!.week = addDays(st!.week, nav[1] === 'nextWeek' ? 7 : -7);
+      return toTime();
+    }
     if (sub === '/time') {
-      const centreId = Number(u.searchParams.get('locationSelect'));
-      const week = u.searchParams.get('week') ?? mondayOf(fromSite(u.searchParams.get('preferredDateStr') ?? '') ?? b.date);
-      return html(res, this.timePage(centreId, week, ''));
+      if (st!.centreId === undefined || !st!.week) return html(res, this.mainPage(b));
+      return html(res, this.timePage(st!.centreId, st!.week, ''));
     }
     if (sub === '/confirm') {
       const [centreId, date, time] = [Number(u.searchParams.get('centre')), u.searchParams.get('date') ?? '', u.searchParams.get('time') ?? ''];
+      // 选位要在站点当前显示的那一周里
+      if (st!.week !== mondayOf(date) || st!.centreId !== centreId) return html(res, this.timePage(centreId, st!.week ?? mondayOf(date), 'Please select a timeslot.'));
       if (!this.isAvailable(centreId, date, time)) return html(res, this.timePage(centreId, mondayOf(date), 'The timeslot you selected is no longer available.'));
       return html(res, this.confirmPage(centreId, date, time, ''));
     }
     if (sub === '/finish' && req.method === 'POST') {
       const [centreId, date, time] = [Number(body.get('centre')), body.get('date') ?? '', body.get('time') ?? ''];
-      if (body.get('contact') !== 'existing' || body.get('terms') !== 'on') {
+      if (body.get('contactGroup') !== 'existing' || body.get('terms') !== 'on') {
         return html(res, this.confirmPage(centreId, date, time, 'Please select a contact number and accept the terms and conditions.'));
       }
       if (!this.isAvailable(centreId, date, time)) {
@@ -171,7 +201,7 @@ export class MockMyrta {
   private locationPage(): string {
     const opts = [...this.centres].map(([id, name]) => `<option value="${id}">${esc(name)}</option>`).join('');
     return page('Choose location', `<p>Step 2 in progress</p>
-<form method="get" action="/tbs-change-main/time">
+<form method="get" action="/tbs-change-main/choose">
   <label>Preferred date <input id="widget_rms_batDateSel" autocomplete="off"
     oninput="document.querySelector('input[name=preferredDateStr]').value=this.value"></label>
   <input type="hidden" name="preferredDateStr" value="">
@@ -194,16 +224,19 @@ export class MockMyrta {
       const q = `centre=${centreId}&date=${date}&time=${time}`;
       cells.push(`<td id="rms_${weekdayKey(date)}_${slotCellTime(time)}"><a class="available" href="#" onclick="pick('${q}');return false">${time}</a></td>`);
     }
-    const nav = (w: LocalDate) => `/tbs-change-main/time?locationSelect=${centreId}&week=${w}`;
     const any = (this.slots.get(centreId)?.size ?? 0) > 0;
     const data = any ? `<script>var timeslots = ${JSON.stringify({ ajaxresult: { slots: { listTimeSlot: list } } })};</script>` : '<p>There are no timeslots available at this location</p>';
     return page('Choose time', `<p>Step 3 in progress</p>
 ${message ? `<p class="error">${esc(message)}</p>` : ''}
-<input id="formTableWeekStarting" value="${site(week)}" readonly>
+<input type="hidden" id="formTableWeekStarting" name="formTableWeekStarting" value="${site(week)}">
 ${data}
 <table><tr>${cells.join('')}</tr></table>
-<a id="prevWeekButton" href="${nav(addDays(week, -7))}">Previous week</a>
-<a id="nextWeekButton" href="${nav(addDays(week, 7))}">Next week</a>
+<script>
+  function goPrev() { window.location = '/tbs-change-main/p0/Eaction!prevWeek==/#Z7_MOCK'; }
+  function goNext() { window.location = '/tbs-change-main/p0/Eaction!nextWeek==/#Z7_MOCK'; }
+</script>
+<span id="prevWeekButton" role="button" onclick="goPrev()">Previous week</span>
+<span id="nextWeekButton" role="button" onclick="goNext()">Next week</span>
 <script>var chosen = null; function pick(q) { chosen = q; }</script>
 <button id="nextButton" onclick="if (chosen) location.href='/tbs-change-main/confirm?' + chosen">Next</button>
 <a id="backButton" href="/tbs-change-main/">Back</a>`);
@@ -213,14 +246,17 @@ ${data}
     return page('Confirm', `<p>Step 4 in progress</p>
 ${message ? `<p class="error">${esc(message)}</p>` : ''}
 <h2>Confirm your new booking</h2>${this.details({ centreId, date, time })}
-<form method="post" action="/tbs-change-main/finish">
+<form method="post" action="/tbs-change-main/finish" id="confirmPaymentForm">
   <input type="hidden" name="centre" value="${centreId}"><input type="hidden" name="date" value="${date}"><input type="hidden" name="time" value="${time}">
+  <input type="hidden" id="rms_batExistingPhone" name="existingPhone" value="0400000000">
   <fieldset><legend>Contact number</legend>
-    <label><input type="radio" id="existingPhone" name="contact" value="existing"> Use the number we have on file</label>
-    <label><input type="radio" id="newPhone" name="contact" value="new"> Enter a new number</label>
+    <label><input type="radio" id="rms_batCon-onFile" name="contactGroup" value="existing" checked> Use this number: 04** *** 000</label>
+    <label><input type="radio" id="rms_batCon-selNew" name="contactGroup" value="new"> Use this number instead:</label>
+    <input type="text" id="widget_phoneNumber" name="phoneNumber">
   </fieldset>
-  <label><input type="checkbox" id="checkTerms" name="terms"> I accept the terms and conditions</label>
-  <button id="finishButton" type="submit">Finish</button>
+  <label><input type="checkbox" id="checkTerms" name="terms"> Accept terms &amp; conditions</label>
+  <span id="closeButton" role="button"><span id="closeButton_label">Quit</span></span>
+  <span id="nextButton" role="button" onclick="document.getElementById('confirmPaymentForm').submit()"><span id="nextButton_label">Finish</span></span>
 </form>
 <a id="backButton" href="/tbs-change-main/">Back</a>`);
   }

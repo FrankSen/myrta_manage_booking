@@ -201,6 +201,8 @@ export async function rebookSlot(student: Student, slot: Slot, session: SiteSess
     page = await session.finish();
     after = await session.readCurrent();
   } catch (err) {
+    // 点 Finish 之前就停下了（找不到电话选项、条款或按钮）：确定没有提交，不能说成"可能已提交"
+    if (err instanceof SiteError && err.kind === 'not_submitted') throw err;
     throw new SiteError('finish_unverified', msg('err.finish_error', { detail: errorText(err) }));
   }
 

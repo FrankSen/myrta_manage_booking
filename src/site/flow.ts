@@ -4,7 +4,7 @@ import type { BookingInfo, LocalDate, Slot } from '../domain/types.ts';
 import { launchBrowser, setWindowState, type BrowserHandle } from './browser.ts';
 import { SiteError } from './errors.ts';
 import { errorText, msg } from '../i18n.ts';
-import { detectPage, freshText, hasNoTimeslotsMessage, loginProblem, hasTimeslotsData, parseBookingDetails, parseTimeslots, type PageKind } from './parse.ts';
+import { detectPage, freshText, hasNoTimeslotsMessage, loginProblem, hasTimeslotsData, parseBookingDetails, parseTimeslots, parseWeekStarting, weekNavUrl, type PageKind } from './parse.ts';
 import type { SiteSession } from './session.ts';
 
 const HOME = 'https://www.myrta.com/';
@@ -18,10 +18,37 @@ const NAV_TIMEOUT = 90_000;
 const cachedManageHref = new Map<string, string>();
 
 /**
- * 确认页的 Finish 按钮。**没在真实网站上见过**，先按 id 找，找不到按按钮文字找。
- * 第一次真实提交时核对（见 test/helpers/mock-myrta.ts 顶部说明）
+ * 确认页（2026-11-19 联网实测，只勾选没提交）：联系电话"Use this number"单选框（默认已选中）、
+ * 条款勾选框、Finish 是 Dojo 按钮 #nextButton（文字 Finish）。提交后的完成页还没见过
  */
-const FINISH_BUTTON = '#finishButton, button:has-text("Finish"), input[type=submit][value="Finish" i]';
+const PHONE_ON_FILE = '#rms_batCon-onFile';
+const TERMS = '#checkTerms';
+const FINISH_BUTTON = '#nextButton';
+
+/**
+ * 停在选时间页时，多久回"查看预约"页重新读一次预约。在软件外改了约要靠这个发现；
+ * 等别人让出考位的学员自己在查那个考位，不靠它
+ */
+export const CURRENT_REFRESH_MS = 10 * 60_000;
+
+/**
+ * 停在某个考点的选时间页。之后刷新、翻周都在页面里直接请求（站点记住当前看到哪一周，
+ * 每次返回的页面里带着翻周地址），不再点页面、不渲染。2026-11-19 联网实测：每次约 2.5–3 秒，
+ * 点页面翻周要 6.5 秒，从预约页走过来查一周要 17 秒
+ */
+interface Parked {
+  centreId: number;
+  /** 刷新当前周用的地址（最近一次返回的页面地址） */
+  url: string;
+  /** 最近一次拿到的选时间页 HTML */
+  html: string;
+  /** 站点现在停在哪一周 */
+  week: LocalDate;
+  /** html 是不是刚拿到的（这一轮还没用过） */
+  fresh: boolean;
+  /** 浏览器里显示的页面是不是最新的（在页面里请求过之后就不是了，选位前要重新载入） */
+  domFresh: boolean;
+}
 
 export interface FlowOptions {
   profileDir: string;
@@ -31,6 +58,9 @@ export interface FlowOptions {
   home?: string;
   /** 测试时替换，默认真实启动浏览器 */
   launch?: (profileDir: string) => Promise<BrowserHandle>;
+  /** 测试时替换 */
+  now?: () => number;
+  currentRefreshMs?: number;
 }
 
 /** 每个学员一个会话：一个独立的浏览器窗口，登录后复用 */
@@ -40,6 +70,12 @@ export class BrowserSession implements SiteSession {
   private loggedIn = false;
   /** 最近一次登录用的资料：提交后停在完成页、回不到预约页时，重新登录读取预约 */
   private creds: { bookingId: string; surname: string } | null = null;
+  private parked: Parked | null = null;
+  /** 最近一次读到的预约和读取时间：停在选时间页时 login() 直接返回它 */
+  private current: BookingInfo | null = null;
+  private currentAt = 0;
+  /** 最近一次 listSlots 是否在页面里直接请求（没有点页面） */
+  lastListFast = false;
   /** 选定考位、停在确认页时，记录所选考位，防止 finish() 在没选位时被调用 */
   private pending: Slot | null = null;
   /** 最近一次 login() 是否复用了已有的登录（没有重新输入资料）。用于观察会话能保持多久 */
@@ -61,6 +97,12 @@ export class BrowserSession implements SiteSession {
     this.creds = { bookingId, surname };
     // 会话还有效：直接回到"查看预约"页，不用重新登录
     this.lastLoginReused = false;
+    // 停在选时间页、预约刚读过：不离开选时间页（回预约页要 19 秒，再走回来又要十几秒）
+    const now = (this.opts.now ?? Date.now)();
+    if (this.loggedIn && this.parked && this.current && now - this.currentAt < (this.opts.currentRefreshMs ?? CURRENT_REFRESH_MS)) {
+      this.lastLoginReused = true;
+      return this.current;
+    }
     if (this.loggedIn) {
       if (await this.tryReturnToMain(page)) {
         this.lastLoginReused = true;
@@ -86,7 +128,10 @@ export class BrowserSession implements SiteSession {
     await page.keyboard.press('Tab');
     await page.waitForTimeout(500);
     const before = await page.innerText('body').catch(() => '');
-    await page.locator('#searchBookingCriteria').getByRole('button', { name: /continue/i }).click();
+    // 站点慢时，点击后等页面跳转会超时（2026-11-19 实测 30 秒）。点到了就行，跳转由 waitForMain 等
+    await page.locator('#searchBookingCriteria').getByRole('button', { name: /continue/i }).click({ timeout: 20_000 }).catch((err: unknown) => {
+      if (!/Timeout/i.test(String((err as Error)?.message ?? err))) throw err;
+    });
     await this.waitForMain(page, before);
     await page.waitForLoadState('domcontentloaded');
     this.loggedIn = true;
@@ -95,20 +140,26 @@ export class BrowserSession implements SiteSession {
 
   async listSlots(centreId: number, dateFrom: LocalDate, dateTo: LocalDate): Promise<Slot[]> {
     const page = await this.page();
-    await this.openChooseTime(page, centreId, dateFrom);
-
+    this.lastListWeeks = [];
+    this.lastListFast = this.parked?.centreId === centreId;
+    if (!this.lastListFast) {
+      await this.openChooseTime(page, centreId, dateFrom);
+      await this.park(page, centreId);
+    }
+    const p = this.parked!;
+    // 站点一次显示一周：先到开始那一周，再一周一周往后，直到超过结束日期
+    await this.moveTo(page, mondayOf(dateFrom));
     const result: Slot[] = [];
     const seen = new Set<string>();
-    this.lastListWeeks = [];
-    // 站点一次显示一周，一周一周往后翻，直到超过结束日期
     for (let guard = 0; guard < 20; guard++) {
-      const html = await this.timeslotsHtml(page);
-      if (html === null) {
-        this.lastListWeeks.push({ weekStart: null, total: 0, available: 0, inRange: 0, noSlotsMessage: true });
+      p.fresh = false;
+      if (!hasTimeslotsData(p.html)) {
+        // 选时间页没有考位数据：站点明确说没有考位才算没有，否则是页面不对
+        if (!hasNoTimeslotsMessage(p.html)) throw new SiteError('unknown_page', msg('err.no_slots_data'));
+        this.lastListWeeks.push({ weekStart: p.week, total: 0, available: 0, inRange: 0, noSlotsMessage: true });
         break;
       }
-      const weekStart = parseSiteDate(await page.locator('#formTableWeekStarting').inputValue());
-      const raw = parseTimeslots(html);
+      const raw = parseTimeslots(p.html);
       let inRange = 0;
       for (const s of raw) {
         if (!s.available || s.date < dateFrom || s.date > dateTo) continue;
@@ -118,19 +169,30 @@ export class BrowserSession implements SiteSession {
         seen.add(key);
         result.push({ centreId, date: s.date, time: s.time });
       }
-      this.lastListWeeks.push({ weekStart, total: raw.length, available: raw.filter((s) => s.available).length, inRange, noSlotsMessage: false });
-      if (addDays(weekStart, 7) > dateTo) break;
-      await this.clickAndLoad(page, '#nextWeekButton');
-      await this.expectKind(page, 'choose_time');
+      this.lastListWeeks.push({ weekStart: p.week, total: raw.length, available: raw.filter((s) => s.available).length, inRange, noSlotsMessage: false });
+      if (addDays(p.week, 7) > dateTo) break;
+      await this.fetchWeek(page, 'next');
     }
     return result;
   }
 
   async reachConfirm(slot: Slot): Promise<BookingInfo> {
     const page = await this.page();
-    // listSlots 刚读完某一周，选位前必须在正确的考点和周上
+    // listSlots 刚读完：站点停在这个考点的选时间页。先让站点翻到考位那一周，再把页面重新载入成那一周，然后点格子
+    const p = this.parked;
+    if (p && p.centreId === slot.centreId) {
+      await this.moveTo(page, mondayOf(slot.date));
+      p.fresh = false;
+      if (!p.domFresh) {
+        await this.go(page, p.url);
+        await this.waitTimeslotsDom(page);
+        p.domFresh = true;
+      }
+    }
     await this.expectKind(page, 'choose_time');
     await this.goToWeek(page, slot.date);
+    // 下面要点页面，离开选时间页
+    this.parked = null;
 
     const id = `#rms_${weekdayKey(slot.date)}_${slotCellTime(slot.time)}`;
     const cell = page.locator(`${id} a`);
@@ -138,7 +200,7 @@ export class BrowserSession implements SiteSession {
       throw new SiteError('unknown_page', msg('err.slot_unavailable', { date: slot.date, time: slot.time }));
     }
     await cell.first().click();
-    await page.waitForTimeout(800);
+    await page.waitForTimeout(300);
     await this.clickAndLoad(page, '#nextButton');
     await this.expectKind(page, 'confirm');
     this.pending = slot;
@@ -152,24 +214,28 @@ export class BrowserSession implements SiteSession {
     if (!this.pending) throw new SiteError('unknown_page', msg('err.no_pending'));
     const page = await this.page();
     await this.expectKind(page, 'confirm');
+    const notSubmitted = (key: string) => new SiteError('not_submitted', msg(key));
 
-    // 联系方式用网站上已登记的号码，再勾选条款（2026-11-17 教练：联系方式已经存在网站上）
-    const phone = page.locator('#existingPhone');
-    if ((await phone.count()) === 0) throw new SiteError('unknown_page', msg('err.finish_no_phone'));
-    await phone.first().check();
-    const terms = page.locator('#checkTerms');
-    if ((await terms.count()) === 0) throw new SiteError('unknown_page', msg('err.finish_no_terms'));
-    await terms.first().check();
-    await page.waitForTimeout(300);
+    // 联系方式用网站上已登记的号码（默认已选中），再勾选条款（2026-11-17 教练：联系方式已经存在网站上）
+    const phone = page.locator(PHONE_ON_FILE);
+    if ((await phone.count()) === 0) throw notSubmitted('err.finish_no_phone');
+    if (!(await phone.first().isChecked())) await phone.first().check();
+    if (!(await phone.first().isChecked())) throw notSubmitted('err.finish_no_phone');
+    const terms = page.locator(TERMS);
+    if ((await terms.count()) === 0) throw notSubmitted('err.finish_no_terms');
+    if (!(await terms.first().isChecked())) await terms.first().check();
+    if (!(await terms.first().isChecked())) throw notSubmitted('err.finish_no_terms');
+    await page.waitForTimeout(200);
     const button = page.locator(FINISH_BUTTON);
-    if ((await button.count()) === 0) throw new SiteError('unknown_page', msg('err.finish_no_button'));
+    if ((await button.count()) === 0 || !/finish/i.test(await button.first().innerText().catch(() => ''))) throw notSubmitted('err.finish_no_button');
 
     // 从这里开始可能已经提交。结果只是页面的说法，调用方必须再用 readCurrent 核实
     const before = await page.innerText('body').catch(() => '');
     this.pending = null;
+    // 点击本身出错也当作可能已提交，照样去看结果；调用方最终用 readCurrent 核实
     await Promise.all([
       page.waitForLoadState('domcontentloaded', { timeout: NAV_TIMEOUT }).catch(() => {}),
-      button.first().click(),
+      button.first().click({ timeout: 20_000 }).catch(() => {}),
     ]);
     for (let i = 0; i < 60; i++) {
       await page.waitForLoadState('domcontentloaded', { timeout: NAV_TIMEOUT }).catch(() => {});
@@ -210,6 +276,7 @@ export class BrowserSession implements SiteSession {
   async close(): Promise<void> {
     this.loggedIn = false;
     this.pending = null;
+    this.parked = null;
     const h = this.handle;
     this.handle = null;
     await h?.close();
@@ -219,6 +286,76 @@ export class BrowserSession implements SiteSession {
 
   private home(): string {
     return this.opts.home ?? HOME;
+  }
+
+  /** 页面现在是这个考点的选时间页：记下来，之后在页面里直接请求 */
+  private async park(page: Page, centreId: number): Promise<void> {
+    await this.waitTimeslotsDom(page);
+    const html = await page.content();
+    const week = parseWeekStarting(html) ?? parseSiteDate(await page.locator('#formTableWeekStarting').inputValue());
+    this.parked = { centreId, url: page.url(), html, week, fresh: true, domFresh: true };
+  }
+
+  /** 让站点停到 want 那一周。已经在那一周且数据是刚拿到的就不再请求，否则刷新一次 */
+  private async moveTo(page: Page, want: LocalDate): Promise<void> {
+    const p = this.parked!;
+    if (p.week === want) {
+      if (!p.fresh) await this.fetchWeek(page, 'same');
+      return;
+    }
+    for (let i = 0; i < 20 && p.week !== want; i++) {
+      const before = p.week;
+      await this.fetchWeek(page, p.week < want ? 'next' : 'prev');
+      // 翻不动了（站点最早只到当前这一周）
+      if (p.week === before) break;
+    }
+  }
+
+  /**
+   * 在页面里直接请求选时间页：same 刷新当前周，next/prev 翻周。不渲染、不点页面。
+   * 拿到的不是选时间页（会话过期等）：不再停在这里，按超时处理，下一轮重新登录走完整流程
+   */
+  private async fetchWeek(page: Page, dir: 'same' | 'next' | 'prev'): Promise<void> {
+    const p = this.parked!;
+    const url = dir === 'same' ? p.url : weekNavUrl(p.html, dir);
+    const lost = () => {
+      this.parked = null;
+      this.loggedIn = false;
+      return new SiteError('timeout', msg('err.parked_lost'));
+    };
+    if (!url) throw lost();
+    let res: { status: number; url: string; text: string };
+    try {
+      res = await page.evaluate(async (u) => {
+        const r = await fetch(u, { credentials: 'include' });
+        return { status: r.status, url: r.url, text: await r.text() };
+      }, url);
+    } catch (err) {
+      this.parked = null;
+      throw new SiteError('timeout', msg('err.open_failed', { detail: errorText(err) }));
+    }
+    if (res.status === 403) {
+      this.parked = null;
+      throw new SiteError('blocked', msg('err.http_403'));
+    }
+    const kind = detectPage(res.text, res.url);
+    if (kind === 'blocked' || kind === 'captcha') {
+      this.parked = null;
+      throw new SiteError(kind, msg(`kind.${kind}`));
+    }
+    const week = parseWeekStarting(res.text);
+    if (!week || !(hasTimeslotsData(res.text) || hasNoTimeslotsMessage(res.text))) throw lost();
+    Object.assign(p, { html: res.text, week, url: res.url || p.url, fresh: true, domFresh: false });
+  }
+
+  /** 等选时间页的考位数据出现在浏览器里（或站点说没有考位） */
+  private async waitTimeslotsDom(page: Page): Promise<void> {
+    for (let i = 0; i < 40; i++) {
+      const html = await page.content().catch(() => '');
+      if (hasTimeslotsData(html) || hasNoTimeslotsMessage(html)) return;
+      await page.waitForTimeout(500);
+    }
+    throw new SiteError('unknown_page', msg('err.no_slots_data'));
   }
 
   /**
@@ -263,20 +400,6 @@ export class BrowserSession implements SiteSession {
     }
   }
 
-  /**
-   * 取选时间页的 HTML。站点明确说没有考位时返回 null。
-   * 两样都没有说明页面还没加载完：等一会儿再看，仍然没有就报错，不能当作"没有考位"
-   */
-  private async timeslotsHtml(page: Page): Promise<string | null> {
-    for (let i = 0; i < 20; i++) {
-      const html = await page.content();
-      if (hasTimeslotsData(html)) return html;
-      if (hasNoTimeslotsMessage(await page.innerText('body').catch(() => ''))) return null;
-      await page.waitForTimeout(1000);
-    }
-    throw new SiteError('unknown_page', msg('err.no_slots_data'));
-  }
-
   /** 从"查看预约"页出发：选考点页 → 选时间页。期望日期设为 from，直接定位到那一周 */
   private async openChooseTime(page: Page, centreId: number, from: LocalDate): Promise<void> {
     if (!(await this.tryReturnToMain(page))) throw new SiteError('unknown_page', msg('err.no_main'));
@@ -292,8 +415,9 @@ export class BrowserSession implements SiteSession {
       changeBtn.click(),
     ]);
     await page.waitForLoadState('domcontentloaded', { timeout: NAV_TIMEOUT }).catch(() => {});
-    await page.waitForTimeout(1500);
     await this.expectKind(page, 'choose_location');
+    // 日期控件是 Dojo 的，页面出来后还要一点时间初始化
+    await page.waitForTimeout(600);
 
     // 期望日期决定站点从哪一周开始显示。必须像真人一样在输入框里键入；
     // 用脚本直接给控件赋值不会生效，而且不报错，会静默落到当前预约所在的那一周
@@ -377,7 +501,8 @@ export class BrowserSession implements SiteSession {
       page.locator(selector).first().click(),
     ]);
     await page.waitForLoadState('domcontentloaded', { timeout: NAV_TIMEOUT }).catch(() => {});
-    await page.waitForTimeout(1500);
+    // 以前固定等 1.5 秒；现在由 expectKind / waitKind 等页面真的变过来
+    await page.waitForTimeout(300);
   }
 
   private async go(page: Page, url: string): Promise<void> {
@@ -392,13 +517,24 @@ export class BrowserSession implements SiteSession {
     }
   }
 
+  /** 每半秒看一次页面，直到 ok 或被拦/验证码或超时，返回最后看到的页面 */
+  private async waitKind(page: Page, ok: (k: PageKind) => boolean, ms: number): Promise<PageKind> {
+    const end = Date.now() + ms;
+    for (;;) {
+      const kind = await this.currentKind(page);
+      if (ok(kind) || kind === 'blocked' || kind === 'captcha' || Date.now() >= end) return kind;
+      await page.waitForTimeout(500);
+    }
+  }
+
   private async currentKind(page: Page): Promise<PageKind> {
     const text = await page.innerText('body').catch(() => '');
     return detectPage(text, page.url());
   }
 
+  /** 等页面变成 want。页面跳转后正文要一会儿才出来，所以要等，最多 15 秒 */
   private async expectKind(page: Page, want: PageKind): Promise<void> {
-    const kind = await this.currentKind(page);
+    const kind = await this.waitKind(page, (k) => k === want, 15_000);
     if (kind === want) return;
     if (kind === 'blocked') throw new SiteError('blocked', msg('kind.blocked'));
     if (kind === 'captcha') throw new SiteError('captcha', msg('kind.captcha'));
@@ -413,7 +549,10 @@ export class BrowserSession implements SiteSession {
 
   private async readSummary(page: Page): Promise<BookingInfo> {
     try {
-      return parseBookingDetails(await page.innerText('body'));
+      const b = parseBookingDetails(await page.innerText('body'));
+      this.current = b;
+      this.currentAt = (this.opts.now ?? Date.now)();
+      return b;
     } catch (err) {
       throw new SiteError('unknown_page', msg('err.read_summary', { detail: errorText(err) }));
     }
@@ -421,7 +560,11 @@ export class BrowserSession implements SiteSession {
 
   /** 从选考点、选时间、确认页回到"查看预约"页：点页面上的退出/返回按钮 */
   private async tryReturnToMain(page: Page): Promise<boolean> {
-    const kind = await this.currentKind(page);
+    // 要点页面了：浏览器里显示的可能不是站点现在的状态，先载入站点现在的页面
+    const p = this.parked;
+    this.parked = null;
+    if (p && !p.domFresh) await this.go(page, p.url).catch(() => {});
+    const kind = await this.waitKind(page, (k) => k !== 'unknown', 5_000);
     if (kind === 'main') return true;
     if (kind !== 'choose_location' && kind !== 'choose_time' && kind !== 'confirm') return false;
     this.pending = null;
@@ -429,7 +572,7 @@ export class BrowserSession implements SiteSession {
       const back = page.locator('#backButton');
       if ((await back.count()) === 0 || !(await back.first().isVisible().catch(() => false))) break;
       await this.clickAndLoad(page, '#backButton');
-      if ((await this.currentKind(page)) === 'main') return true;
+      if ((await this.waitKind(page, (k) => k === 'main', 8_000)) === 'main') return true;
     }
     return (await this.currentKind(page)) === 'main';
   }

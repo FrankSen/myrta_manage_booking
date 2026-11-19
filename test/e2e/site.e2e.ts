@@ -17,8 +17,8 @@ afterAll(() => rmSync(root, { recursive: true, force: true }));
 let site: MockMyrta;
 const sessions: BrowserSession[] = [];
 let n = 0;
-const open = (allowFinish = true) => {
-  const s = new BrowserSession({ profileDir: join(root, `p${++n}`), allowFinish, home: site.url });
+const open = (allowFinish = true, extra: { now?: () => number; currentRefreshMs?: number } = {}) => {
+  const s = new BrowserSession({ profileDir: join(root, `p${++n}`), allowFinish, home: site.url, ...extra });
   sessions.push(s);
   return s;
 };
@@ -104,5 +104,75 @@ describe('BrowserSession × 假网站', () => {
     expect(homeHits).toBe(1);
     await open().login('2222222222', 'Bravo');
     expect(site.hits.filter((h) => h === '/').length).toBe(1);
+  });
+
+  test('停在选时间页：同一考点再查不点页面，直接在页面里请求，能看到新放出的考位', async () => {
+    const a = open();
+    await a.login('1111111111', 'Alpha');
+    await a.listSlots(241, '2026-12-07', '2026-12-20');
+    expect(a.lastListFast).toBe(false);
+    const chooses = () => site.hits.filter((h) => h === '/tbs-change-main/choose').length;
+    const mains = () => site.hits.filter((h) => h === '/tbs-change-main/').length;
+    expect(chooses()).toBe(1);
+    const m0 = mains();
+
+    site.add(241, '2026-12-08', '13:00');
+    const t = Date.now();
+    // 每轮先 login：停在选时间页时不回预约页
+    await a.login('1111111111', 'Alpha');
+    const slots = await a.listSlots(241, '2026-12-07', '2026-12-20');
+    const ms = Date.now() - t;
+    expect(a.lastListFast).toBe(true);
+    expect(slots).toContainEqual({ centreId: 241, date: '2026-12-08', time: '13:00' });
+    expect(slots).toContainEqual({ centreId: 241, date: '2026-12-17', time: '14:15' });
+    expect(chooses()).toBe(1);
+    expect(mains()).toBe(m0);
+    console.log(`快速一轮（2 周）${ms}ms`);
+  });
+
+  test('翻到后面的周之后，选前面那一周的考位：站点先翻回去、页面重新载入，再走到确认页并提交', async () => {
+    const a = open();
+    await a.login('1111111111', 'Alpha');
+    await a.listSlots(241, '2026-12-07', '2026-12-20'); // 站点停在 12-14 那一周
+    const t = Date.now();
+    await a.reachConfirm({ centreId: 241, date: '2026-12-10', time: '09:00' });
+    expect(await a.finish()).toBe('success');
+    console.log(`选位 → 确认页 → 提交 ${Date.now() - t}ms`);
+    expect(site.booking('1111111111')).toMatchObject({ date: '2026-12-10', time: '09:00' });
+  });
+
+  test('停在选时间页超过 10 分钟：login 回预约页重新读一次预约（发现软件外的改约）', async () => {
+    let now = 1_000_000;
+    const a = open(true, { now: () => now, currentRefreshMs: 10 * 60_000 });
+    await a.login('1111111111', 'Alpha');
+    await a.listSlots(241, '2026-12-07', '2026-12-13');
+    site.booking('1111111111')!.date = '2026-12-31';
+    expect((await a.login('1111111111', 'Alpha')).date).toBe('2026-12-30');
+    now += 11 * 60_000;
+    expect((await a.login('1111111111', 'Alpha')).date).toBe('2026-12-31');
+  });
+
+  test('会话过期：页面里请求拿不到选时间页，按超时报错；下一轮重新登录照常', async () => {
+    const a = open();
+    await a.login('1111111111', 'Alpha');
+    await a.listSlots(241, '2026-12-07', '2026-12-13');
+    site.expireSessions();
+    const err = await a.listSlots(241, '2026-12-07', '2026-12-13').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(SiteError);
+    expect((err as SiteError).kind).toBe('timeout');
+    await a.login('1111111111', 'Alpha');
+    expect(await a.listSlots(241, '2026-12-07', '2026-12-13')).toContainEqual({ centreId: 241, date: '2026-12-10', time: '09:00' });
+  });
+
+  test('确认页找不到条款：报 not_submitted，什么都没提交', async () => {
+    const a = open();
+    await a.login('1111111111', 'Alpha');
+    await a.listSlots(241, '2026-12-07', '2026-12-13');
+    await a.reachConfirm({ centreId: 241, date: '2026-12-10', time: '09:00' });
+    const page = (a as unknown as { handle: { page: import('playwright-core').Page } }).handle.page;
+    await page.evaluate(() => document.getElementById('checkTerms')?.remove());
+    const err = await a.finish().catch((e: unknown) => e);
+    expect((err as SiteError).kind).toBe('not_submitted');
+    expect(site.finished).toEqual([]);
   });
 });
