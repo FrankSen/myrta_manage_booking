@@ -49,10 +49,10 @@ async function boot(): Promise<void> {
     core = await startApp({
       runtimeDir: dataDir,
       centresFile: join(root, 'data', 'nsw-test-centres.json'),
-      // 提交只用于设置了让位的双方；全局自动改约仍强制关闭（finishAvailable: false）。见 src/main.ts
+      // 自动改约默认开启，界面顶部可以关掉；让位的双方总是自动提交。见 src/main.ts
       openSession: async (_id, profileDir) => new BrowserSession({ profileDir, allowFinish: true }),
       cleanupBrowsers: (root) => cleanupOrphans(root),
-      finishAvailable: false,
+      finishAvailable: true,
       requireLicense: true,
       openWindow: () => null,
       warn: (m) => console.warn(render(lang, m)),

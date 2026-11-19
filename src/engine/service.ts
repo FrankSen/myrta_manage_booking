@@ -93,6 +93,8 @@ export class Service {
   private readonly ops = new Map<number, AbortController>();
   private globalIntervalMs: number;
   private readonly notify: (e: NotifyEvent) => void;
+  /** 自动改约开关：开启时完全符合的考位直接提交，关闭时停在确认页等教练。界面上可以随时切换 */
+  private autoRebook: boolean;
 
   constructor(deps: ServiceDeps) {
     this.deps = deps;
@@ -101,6 +103,7 @@ export class Service {
       deps.notify(e);
     };
     this.globalIntervalMs = deps.settings.hidden.checkIntervalMs;
+    this.autoRebook = deps.settings.autoRebookEnabled;
     this.scheduler = new Scheduler(deps.clock, deps.settings.hidden, (id) => this.runCheck(id), deps.random, (id) => this.intervalFor(id));
   }
 
@@ -145,6 +148,15 @@ export class Service {
     let total = 0;
     for (const a of active) total += this.visits(a);
     return expectedCycleMs({ intervalMs: this.intervalFor(id), ownVisits: this.visits(id), totalVisits: total, gapMs: this.deps.settings.hidden.globalMinGapMs });
+  }
+
+  autoRebookEnabled(): boolean {
+    return this.autoRebook;
+  }
+
+  /** 切换自动改约。下一轮检查起生效，正在进行的一轮按原来的设置 */
+  setAutoRebook(enabled: boolean): void {
+    this.autoRebook = enabled;
   }
 
   globalInterval(): number {
@@ -485,7 +497,7 @@ export class Service {
       dropSession: (id) => this.dropSession(id),
       tolerance: d.settings.tolerance,
       centres: d.centres,
-      autoRebookEnabled: d.settings.autoRebookEnabled,
+      autoRebookEnabled: this.autoRebook,
       notify: (e) => this.notify(e),
       autoSubmit: (id) => this.autoSubmit(id),
       state: this.state,

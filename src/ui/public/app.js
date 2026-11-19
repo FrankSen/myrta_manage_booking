@@ -546,6 +546,15 @@ function applyStatic() {
   for (const el of $$('[data-i18n-title]')) el.title = tr(el.dataset.i18nTitle);
   document.title = tr('app.title');
 }
+$('#mode').onclick = async () => {
+  const next = !state.autoRebookEnabled;
+  if (!confirm(tr(next ? 'mode.confirm_on' : 'mode.confirm_off'))) return;
+  try {
+    const r = await api('PUT', '/api/settings/auto-rebook', { enabled: next });
+    state.autoRebookEnabled = r.autoRebookEnabled;
+    renderMode();
+  } catch (e) { alert(e.message); }
+};
 function renderMode() {
   const mode = $('#mode');
   mode.textContent = tr(state.autoRebookEnabled ? 'mode.on' : 'mode.off');

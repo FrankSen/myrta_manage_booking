@@ -137,6 +137,12 @@
 - 固定等待 1.5 秒改为 300 毫秒 + 等页面变过来（`expectKind` 最多等 15 秒）；登录点 Continue 时站点慢导致的点击超时不再报错。
 - **新流程整轮耗时还没在真实网站上测到**：当天多次实测后网站登录卡住（疑似限流），隔一会儿的全新会话能登录。模拟网站上让位全流程 40 秒 → 14.5 秒。
 
+## 2026-11-19 v0.2.2：自动改约默认开启，界面可切换
+
+- `autoRebookEnabled` 默认 true（教练要求）。顶部"自动改约"标牌改为按钮，点一下确认后切换，写回 `settings.json` 顶层 `autoRebookEnabled`，重启保持（`PUT /api/settings/auto-rebook`）。`Service.setAutoRebook` 下一轮起生效。
+- 生产入口 `finishAvailable: true`。`finishAvailable: false` 时界面不能打开（409），启动时按关闭运行并提示。
+- 已有 `settings.json` 里明确写了 `autoRebookEnabled: false` 的保持关闭；没写的按新默认开启。
+
 ## 下一步（按顺序）
 
 1. **在真实 Windows 上走一遍**：解压 zip，双击 `MyRTA Rebook.exe`，看 SmartScreen 提示、快捷方式、中文显示（英文 Windows 也要看）、能找到 Chrome/Edge、添加学员能读到预约、关窗口后浏览器都关了、iOA 弹窗是否减少。

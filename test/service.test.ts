@@ -21,7 +21,8 @@ function setup(settings: Partial<Settings> = {}, allowed?: () => boolean) {
   const limiter = { acquire: async () => {}, reportBlocked: () => 5 * MIN, reportOk: () => {} };
   // 这组测试验证调度/排队数学，与生产默认值解耦：固定 2 分钟间隔、全局 20 秒间隔（默认已改为 5 秒 / 2 秒）
   const testHidden = { ...DEFAULT_SETTINGS.hidden, checkIntervalMs: 2 * MIN, globalMinGapMs: 20_000 };
-  const merged: Settings = { ...DEFAULT_SETTINGS, ...settings, hidden: { ...testHidden, ...(settings.hidden ?? {}) } };
+  // 这组测试大多验证"停在确认页等教练"，自动改约默认按关闭（生产默认已改为开启）；要开启的测试显式传入
+  const merged: Settings = { ...DEFAULT_SETTINGS, autoRebookEnabled: false, ...settings, hidden: { ...testHidden, ...(settings.hidden ?? {}) } };
   const service = new Service({
     repo, clock, limiter, settings: merged, centres,
     openSession: async (id) => {
@@ -309,7 +310,7 @@ describe('退出时不被限速等待卡住', () => {
     limiter.reportBlocked(); // 5 分钟退避
     const sessions: FakeSession[] = [];
     const service = new Service({
-      repo, clock, limiter, settings: DEFAULT_SETTINGS, centres,
+      repo, clock, limiter, settings: { ...DEFAULT_SETTINGS, autoRebookEnabled: false }, centres,
       openSession: async () => { const s = new FakeSession(); sessions.push(s); return s; },
       notify: () => {},
     });
@@ -773,7 +774,7 @@ describe('被拦后退避期间不访问网站', () => {
     const limiter = new Limiter(clock, DEFAULT_SETTINGS.hidden);
     const opened: FakeSession[] = [];
     const service = new Service({
-      repo, clock, limiter, settings: DEFAULT_SETTINGS, centres,
+      repo, clock, limiter, settings: { ...DEFAULT_SETTINGS, autoRebookEnabled: false }, centres,
       openSession: async () => {
         const s = new FakeSession();
         // 第一个浏览器登录被拦，之后正常
@@ -828,7 +829,7 @@ describe('退避期间放弃确认页', () => {
     const limiter = new Limiter(clock, { ...DEFAULT_SETTINGS.hidden, globalMinGapMs: 1 });
     const sessions: FakeSession[] = [];
     const service = new Service({
-      repo, clock, limiter, settings: DEFAULT_SETTINGS, centres,
+      repo, clock, limiter, settings: { ...DEFAULT_SETTINGS, autoRebookEnabled: false }, centres,
       openSession: async () => { const s = new FakeSession(); s.slotsByCentre.set(SILVERWATER, [slot(SILVERWATER, '2026-11-17', '10:00')]); sessions.push(s); return s; },
       notify: () => {}, random: () => 0.5,
     });

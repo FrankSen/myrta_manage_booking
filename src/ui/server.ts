@@ -27,6 +27,10 @@ export interface UiDeps {
   /** 中断添加学员时正在进行的读取 */
   cancelFetch?: () => void;
   autoRebookEnabled: boolean;
+  /** 站点会话能不能真正点 Finish。不能时不允许打开自动改约。默认能 */
+  finishAvailable?: boolean;
+  /** 自动改约开关改了之后保存。没有时只在本次运行有效 */
+  saveAutoRebook?: (enabled: boolean) => void;
   /** 日期容差，算"还能刷新到什么时候"用，和引擎一致 */
   maxDateDays?: number;
   now(): number;
@@ -195,7 +199,8 @@ export async function startUiServer(deps: UiDeps, opts: { port?: number; token?:
       return send(res, 200, {
         license: publicLicense(licenseState()),
         centres: deps.centreList.map((c) => ({ id: c.id, name: c.name, suburb: c.suburb, postcode: c.postcode })),
-        autoRebookEnabled: deps.autoRebookEnabled,
+        autoRebookEnabled: deps.service.autoRebookEnabled?.() ?? deps.autoRebookEnabled,
+        finishAvailable: deps.finishAvailable !== false,
         messages: recentMessages,
         intervalMs: deps.service.globalInterval(),
         intervalChoicesMs: INTERVAL_CHOICES_MS,
@@ -306,6 +311,14 @@ export async function startUiServer(deps: UiDeps, opts: { port?: number; token?:
       if (!isLang(lang)) throw new ValidationError(msg('api.bad_lang'));
       deps.language?.set(lang);
       return send(res, 200, { language: lang });
+    }
+    if (method === 'PUT' && path === '/api/settings/auto-rebook') {
+      const enabled = ((await readJson(req)) as { enabled?: unknown }).enabled;
+      if (typeof enabled !== 'boolean') throw new ValidationError(msg('api.auto_rebook_bad'));
+      if (enabled && deps.finishAvailable === false) return send(res, 409, { error: msg('api.auto_rebook_unavailable') });
+      deps.service.setAutoRebook(enabled);
+      deps.saveAutoRebook?.(enabled);
+      return send(res, 200, { autoRebookEnabled: enabled });
     }
     if (method === 'PUT' && path === '/api/settings/feishu') {
       if (!deps.feishu) return send(res, 404, { error: msg('api.no_student') });

@@ -44,7 +44,8 @@ export const DEFAULT_SETTINGS: Settings = {
     backoffMaxMs: 60 * 60_000,
   },
   tolerance: { maxTimeMinutes: 60, maxDateDays: 0 },
-  autoRebookEnabled: false,
+  // 2026-11-19 教练要求默认开启：完全符合目标的考位自动提交。界面顶部可以随时关掉
+  autoRebookEnabled: true,
   language: DEFAULT_LANG,
   notify: { feishuWebhook: '' },
 };

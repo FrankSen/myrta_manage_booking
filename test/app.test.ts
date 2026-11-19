@@ -32,7 +32,8 @@ describe('装配', () => {
     expect(res.status).toBe(200);
     expect(existsSync(join(d, 'data.sqlite'))).toBe(true);
     expect(existsSync(join(d, 'secret.key'))).toBe(true);
-    expect(app.settings.autoRebookEnabled).toBe(false);
+    // 2026-11-19 起默认开启
+    expect(app.settings.autoRebookEnabled).toBe(true);
   });
 
   test('同一个运行时目录不能同时启动两个', async () => {
@@ -291,6 +292,30 @@ describe('提交功能未启用', () => {
     writeFileSync(join(d, 'settings.json'), JSON.stringify({ autoRebookEnabled: true }));
     app = await startApp({ runtimeDir: d, centresFile, openWindow: () => null, openSession: async () => new FakeSession() });
     expect(app.settings.autoRebookEnabled).toBe(true);
+  });
+
+  test('界面切换自动改约后写回 settings.json，重启后保持', async () => {
+    const d = dir();
+    const start = () => startApp({ runtimeDir: d, centresFile, openWindow: () => null, openSession: async () => new FakeSession() });
+    app = await start();
+    expect(app.service.autoRebookEnabled()).toBe(true);
+    const res = await fetch(`http://127.0.0.1:${app.ui.port}/api/settings/auto-rebook`, {
+      method: 'PUT', headers: { 'X-Token': app.ui.token, 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: false }),
+    });
+    expect(res.status).toBe(200);
+    expect(loadSettings(join(d, 'settings.json')).autoRebookEnabled).toBe(false);
+    await app.stop();
+    app = await start();
+    expect(app.service.autoRebookEnabled()).toBe(false);
+  });
+
+  test('提交功能不可用时，界面不能打开自动改约', async () => {
+    const d = dir();
+    app = await startApp({ runtimeDir: d, centresFile, openWindow: () => null, openSession: async () => new FakeSession(), finishAvailable: false, warn: () => {} });
+    const res = await fetch(`http://127.0.0.1:${app.ui.port}/api/settings/auto-rebook`, {
+      method: 'PUT', headers: { 'X-Token': app.ui.token, 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: true }),
+    });
+    expect(res.status).toBe(409);
   });
 });
 

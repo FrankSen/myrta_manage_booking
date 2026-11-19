@@ -15,7 +15,7 @@ import { acquireLock } from './lock.ts';
 import { LicenseGate } from '../license/gate.ts';
 import { TextError, errorText, msg, render, type Lang, type Text } from '../i18n.ts';
 import { runtimePaths } from './paths.ts';
-import { loadSettings, saveCheckInterval, saveLanguage, saveFeishuWebhook } from './settings-file.ts';
+import { loadSettings, saveAutoRebook, saveCheckInterval, saveLanguage, saveFeishuWebhook } from './settings-file.ts';
 import { createFeishuPusher } from '../notify/feishu.ts';
 
 export interface AppOptions {
@@ -144,6 +144,8 @@ export async function startApp(opts: AppOptions): Promise<App> {
           },
         },
         autoRebookEnabled: settings.autoRebookEnabled,
+        finishAvailable: opts.finishAvailable !== false,
+        saveAutoRebook: (enabled) => saveAutoRebook(paths.settings, enabled),
         maxDateDays: settings.tolerance.maxDateDays,
         now: () => clock.now(),
         pushMessage: (m) => feishu.push(m),

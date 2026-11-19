@@ -79,7 +79,7 @@ function setup(settings: Partial<Settings> = {}) {
   const site = new Site();
   const sessions = new Map<number, SharedSession>();
   const events: NotifyEvent[] = [];
-  const merged: Settings = { ...DEFAULT_SETTINGS, ...settings, hidden: { ...DEFAULT_SETTINGS.hidden, checkIntervalMs: 2 * MIN, globalMinGapMs: 20_000 } };
+  const merged: Settings = { ...DEFAULT_SETTINGS, autoRebookEnabled: false, ...settings, hidden: { ...DEFAULT_SETTINGS.hidden, checkIntervalMs: 2 * MIN, globalMinGapMs: 20_000 } };
   const service = new Service({
     repo, clock, settings: merged, centres,
     limiter: { acquire: async () => {}, reportBlocked: () => 5 * MIN, reportOk: () => {} },

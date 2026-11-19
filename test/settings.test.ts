@@ -6,7 +6,7 @@ describe('settings', () => {
     expect(DEFAULT_SETTINGS.hidden.maxActiveStudents).toBe(5);
     expect(DEFAULT_SETTINGS.hidden.checkIntervalMs).toBe(5_000);
     expect(DEFAULT_SETTINGS.hidden.globalMinGapMs).toBe(2_000);
-    expect(DEFAULT_SETTINGS.autoRebookEnabled).toBe(false);
+    expect(DEFAULT_SETTINGS.autoRebookEnabled).toBe(true);
     expect(DEFAULT_SETTINGS.notify.feishuWebhook).toBe('');
     expect(DEFAULT_SETTINGS.tolerance).toEqual({ maxTimeMinutes: 60, maxDateDays: 0 });
   });

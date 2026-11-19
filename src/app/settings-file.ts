@@ -40,6 +40,16 @@ export function saveLanguage(path: string, language: string): void {
   patch(path, 'ui', { language });
 }
 
+/** 把自动改约开关写回配置文件（顶层的 autoRebookEnabled） */
+export function saveAutoRebook(path: string, enabled: boolean): void {
+  const raw = existsSync(path) ? readRaw(path) : {};
+  raw.autoRebookEnabled = enabled;
+  mkdirSync(dirname(path), { recursive: true });
+  const tmp = `${path}.tmp`;
+  writeFileSync(tmp, JSON.stringify(raw, null, 2) + '\n');
+  renameSync(tmp, path);
+}
+
 /** 把飞书 Webhook 地址写回配置文件 */
 export function saveFeishuWebhook(path: string, feishuWebhook: string): void {
   patch(path, 'notify', { feishuWebhook });

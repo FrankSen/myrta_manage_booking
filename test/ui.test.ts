@@ -20,7 +20,8 @@ async function setup(opts: { fetchCurrent?: () => Promise<{ centreName: string; 
   const clock = new FakeClock(NOW);
   const limiter = { acquire: async () => {}, reportBlocked: () => 1, reportOk: () => {} };
   const service = new Service({
-    repo, clock, limiter, settings: DEFAULT_SETTINGS, centres,
+    // 界面测试按自动改约关闭（停在确认页）；生产默认已开启
+    repo, clock, limiter, settings: { ...DEFAULT_SETTINGS, autoRebookEnabled: false }, centres,
     openSession: async () => new FakeSession(),
     notify: (e) => server?.publish(e),
   });
@@ -413,5 +414,19 @@ describe('让位接口', () => {
     expect(back.status).toBe(409);
     expect(((await back.json()) as { result: string }).result).toBe('taken');
     await t.service.stopAll();
+  });
+});
+
+describe('自动改约开关', () => {
+  test('state 里显示当前开关；可以切换；参数不对 400', async () => {
+    const { call, service } = await setup();
+    const st = (await (await call('GET', '/api/state')).json()) as { autoRebookEnabled: boolean };
+    expect(st.autoRebookEnabled).toBe(false);
+    expect((await call('PUT', '/api/settings/auto-rebook', { enabled: 'yes' })).status).toBe(400);
+    expect((await call('PUT', '/api/settings/auto-rebook', { enabled: true })).status).toBe(200);
+    expect(service.autoRebookEnabled()).toBe(true);
+    expect(((await (await call('GET', '/api/state')).json()) as { autoRebookEnabled: boolean }).autoRebookEnabled).toBe(true);
+    expect((await call('PUT', '/api/settings/auto-rebook', { enabled: false })).status).toBe(200);
+    expect(service.autoRebookEnabled()).toBe(false);
   });
 });
