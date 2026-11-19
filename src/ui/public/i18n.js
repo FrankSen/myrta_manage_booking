@@ -221,6 +221,8 @@ const zh = {
   'kind.confirm_mismatch': '确认页内容和所选考位不一致',
   'kind.finish_unverified': '已提交，但无法确认改约结果，请人工查看预约',
   'kind.not_submitted': '确认页上没能完成提交，什么都没有提交',
+  'kind.slot_gone': '考位被别人抢先约走了',
+    'log.slot_gone': '考位被别人抢先约走了，继续刷新',
 
   'stop.locked': '原考试距现在不足 48 小时，预约已锁定，不能再改',
   'stop.target_passed': '目标日期范围已全部进入 48 小时以内，没有可改的日子了',
@@ -293,6 +295,9 @@ const zh = {
   'err.no_pending': '还没有选定考位，不能提交',
   'err.finish_unsupported': '提交流程还没有验证过，暂不支持',
   'err.parked_lost': '停在选时间页时网站返回的不是选时间页（可能会话过期），下一轮重新登录',
+  'err.login_click_timeout': '点了登录但没有反应，可能是网站太慢或被拦了',
+  'err.login_unknown_retry': '登录后没有进入预约页，可能是网站太慢、会话过期或被拦。软件已经自动换成新会话重试，不需要手动重启',
+
   'err.finish_no_phone': '确认页上找不到"使用已登记的联系电话"选项，没有提交',
   'err.finish_no_terms': '确认页上找不到条款勾选框，没有提交',
   'err.finish_no_button': '确认页上找不到 Finish 按钮，没有提交',
@@ -577,7 +582,8 @@ const en = {
   'kind.confirm_mismatch': "The confirm page doesn't match the chosen slot",
   'kind.finish_unverified': "Submitted, but the result couldn't be confirmed. Please check the booking yourself",
   'kind.not_submitted': "Couldn't submit on the confirm page; nothing was submitted",
-
+  'kind.slot_gone': 'Someone else booked the slot first',
+  'log.slot_gone': 'Someone else booked the slot first; keep refreshing',
   'stop.locked': 'The current test is less than 48 hours away, so the booking is locked',
   'stop.target_passed': 'All target dates are now within 48 hours; there are no days left to move to',
 
@@ -649,6 +655,9 @@ const en = {
   'err.no_pending': "No slot has been chosen yet, so it can't submit",
   'err.finish_unsupported': "The submit step hasn't been verified yet and isn't supported",
   'err.parked_lost': "The site didn't return the choose-time page (the session may have expired); logging in again next round",
+  'err.login_click_timeout': 'The login button click did nothing. The site may be slow or blocking us',
+  'err.login_unknown_retry': 'Login did not reach the booking page. The site may be slow, the session may have expired, or we may be blocked. A new session will be retried automatically; no manual restart is needed',
+
   'err.finish_no_phone': "Couldn't find the \"use the registered phone number\" option on the confirm page; nothing was submitted",
   'err.finish_no_terms': "Couldn't find the terms checkbox on the confirm page; nothing was submitted",
   'err.finish_no_button': "Couldn't find the Finish button on the confirm page; nothing was submitted",

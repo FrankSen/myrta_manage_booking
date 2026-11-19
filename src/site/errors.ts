@@ -9,7 +9,9 @@ export type SiteErrorKind =
   | 'timeout' // 页面加载或操作超时
   | 'confirm_mismatch' // 确认页内容和所选考位不一致
   | 'finish_unverified' // 点了 Finish，但无法确认结果
-  | 'not_submitted'; // 到了确认页但没能点 Finish（找不到电话选项/条款/按钮），什么都没提交
+  | 'not_submitted' // 到了确认页但没能点 Finish（找不到电话选项/条款/按钮），什么都没提交
+  | 'slot_gone'; // 考位在选中前被别人抢先约走了，是正常竞争，不是错误
+
 
 /** 站点操作出错。text 是给教练看的说明（可翻译），message 是它的中文版本 */
 export class SiteError extends TextError {

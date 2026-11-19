@@ -143,6 +143,15 @@
 - 生产入口 `finishAvailable: true`。`finishAvailable: false` 时界面不能打开（409），启动时按关闭运行并提示。
 - 已有 `settings.json` 里明确写了 `autoRebookEnabled: false` 的保持关闭；没写的按新默认开启。
 
+## 2026-11-19 v0.2.3：健壮性（自愈）
+
+- 教练遇到"提交登录后没有进入预约页，也不是已知的错误提示"，要重启才好。现在不认识的登录失败按 `timeout` 处理：关浏览器、下一轮全新会话重试，连续 3 次才暂停（`reportError` 的 `failStreak`）。登录点击超时先等 8 秒看是否已跳转，没有才报 `err.login_click_timeout`。
+- `tryReturnToMain` 看到被拦/验证码页面抛 `blocked`/`captcha`（走退避），不再当成"回预约页失败"暂停学员。
+- 新错误类型 `slot_gone`：选位前考位被别人抢先约走是正常竞争，记一条日志继续刷新，不暂停（让位的 B 抢不到也不会挂起）。
+- 页面内请求（`fetchWeek`）也过全局限速：`SiteSession.setThrottle`，`start.ts` 装配时挂 `limiter.acquire`。
+- 拿到的不是选时间页时（`parked_lost`）同时清掉 `current`，下一轮强制重新登录。
+- 端到端测试 13 个（`npm run test:e2e`，约 2.5 分钟）。工具有超时限制时放后台跑：`nohup npx vitest run -c vitest.e2e.config.ts > /tmp/e2e.log &`。
+
 ## 下一步（按顺序）
 
 1. **在真实 Windows 上走一遍**：解压 zip，双击 `MyRTA Rebook.exe`，看 SmartScreen 提示、快捷方式、中文显示（英文 Windows 也要看）、能找到 Chrome/Edge、添加学员能读到预约、关窗口后浏览器都关了、iOA 弹窗是否减少。

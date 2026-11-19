@@ -250,6 +250,12 @@ export async function reportError(student: Student, err: unknown, deps: CheckDep
     return 'continue';
   }
 
+  // 考位被别人抢先：正常竞争，记下来继续刷新，不算失败
+  if (kind === 'slot_gone') {
+    repo.log(student.id, 'warn', msg('log.slot_gone'), clock.now());
+    return 'continue';
+  }
+
   if (kind === 'timeout') {
     const n = (deps.state.failStreak.get(student.id) ?? 0) + 1;
     deps.state.failStreak.set(student.id, n);

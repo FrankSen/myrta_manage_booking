@@ -20,5 +20,7 @@ export interface SiteSession {
   reveal?(): Promise<void>;
   /** 把浏览器窗口最小化 */
   conceal?(): Promise<void>;
+  /** 页面内直接发请求时，每次请求前调用（全局限速）。生产装配时挂上 */
+  setThrottle?(fn: () => Promise<void>): void;
   close(): Promise<void>;
 }

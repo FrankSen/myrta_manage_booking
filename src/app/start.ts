@@ -124,7 +124,12 @@ export async function startApp(opts: AppOptions): Promise<App> {
     });
     const service = new Service({
       repo, clock, limiter, settings, centres,
-      openSession: (id) => opts.openSession(id, `${paths.browserProfiles}/${id}`),
+      openSession: async (id) => {
+        const s = await opts.openSession(id, `${paths.browserProfiles}/${id}`);
+        // 页面内请求也要排全局限速，不然 5 个学员会同时打向网站
+        s.setThrottle?.(() => limiter.acquire());
+        return s;
+      },
       notify: (e) => ui?.publish(e),
       saveGlobalInterval: (ms) => saveCheckInterval(paths.settings, ms),
       allowed: license ? () => license.ok() : undefined,

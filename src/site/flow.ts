@@ -61,6 +61,8 @@ export interface FlowOptions {
   /** 测试时替换 */
   now?: () => number;
   currentRefreshMs?: number;
+  /** 每次页面内请求前调用（全局限速）；没有时直接请求 */
+  throttle?: () => Promise<void>;
 }
 
 /** 每个学员一个会话：一个独立的浏览器窗口，登录后复用 */
@@ -71,6 +73,7 @@ export class BrowserSession implements SiteSession {
   /** 最近一次登录用的资料：提交后停在完成页、回不到预约页时，重新登录读取预约 */
   private creds: { bookingId: string; surname: string } | null = null;
   private parked: Parked | null = null;
+  private throttle: (() => Promise<void>) | null = null;
   /** 最近一次读到的预约和读取时间：停在选时间页时 login() 直接返回它 */
   private current: BookingInfo | null = null;
   private currentAt = 0;
@@ -128,10 +131,20 @@ export class BrowserSession implements SiteSession {
     await page.keyboard.press('Tab');
     await page.waitForTimeout(500);
     const before = await page.innerText('body').catch(() => '');
-    // 站点慢时，点击后等页面跳转会超时（2026-11-19 实测 30 秒）。点到了就行，跳转由 waitForMain 等
-    await page.locator('#searchBookingCriteria').getByRole('button', { name: /continue/i }).click({ timeout: 20_000 }).catch((err: unknown) => {
+    // 站点慢时，点击后等页面跳转会超时（2026-11-19 实测 30 秒）。先点一下，如果点击本身超时，
+    // 再等一小会看是否其实点到了（页面已经跳转），没有再报超时。比直接吞掉更准
+    try {
+      await page.locator('#searchBookingCriteria').getByRole('button', { name: /continue/i }).click({ timeout: 8_000 });
+    } catch (err) {
       if (!/Timeout/i.test(String((err as Error)?.message ?? err))) throw err;
-    });
+      // 点击超时：可能网站慢、按钮点了没反应，也可能点击其实生效了只是没跳到。再等 8 秒
+      const after = await page.waitForURL(/tbs-change-main/, { timeout: 8_000 }).then(() => 'main' as const).catch(() => null);
+      if (after) {
+        this.loggedIn = true;
+        return this.readSummary(page);
+      }
+      throw new SiteError('timeout', msg('err.login_click_timeout'));
+    }
     await this.waitForMain(page, before);
     await page.waitForLoadState('domcontentloaded');
     this.loggedIn = true;
@@ -197,7 +210,7 @@ export class BrowserSession implements SiteSession {
     const id = `#rms_${weekdayKey(slot.date)}_${slotCellTime(slot.time)}`;
     const cell = page.locator(`${id} a`);
     if ((await cell.count()) === 0 || !(await cell.first().getAttribute('class'))?.includes('available')) {
-      throw new SiteError('unknown_page', msg('err.slot_unavailable', { date: slot.date, time: slot.time }));
+      throw new SiteError('slot_gone', msg('err.slot_unavailable', { date: slot.date, time: slot.time }));
     }
     await cell.first().click();
     await page.waitForTimeout(300);
@@ -269,6 +282,10 @@ export class BrowserSession implements SiteSession {
     if (this.handle) await setWindowState(this.handle.page, 'normal');
   }
 
+  setThrottle(fn: () => Promise<void>): void {
+    this.throttle = fn;
+  }
+
   async conceal(): Promise<void> {
     if (this.handle && process.env.MYRTA_MINIMIZE !== '0') await setWindowState(this.handle.page, 'minimized');
   }
@@ -321,9 +338,12 @@ export class BrowserSession implements SiteSession {
     const lost = () => {
       this.parked = null;
       this.loggedIn = false;
+      this.current = null;
       return new SiteError('timeout', msg('err.parked_lost'));
     };
     if (!url) throw lost();
+    const throttle = this.throttle ?? this.opts.throttle;
+    if (throttle) await throttle();
     let res: { status: number; url: string; text: string };
     try {
       res = await page.evaluate(async (u) => {
@@ -477,10 +497,11 @@ export class BrowserSession implements SiteSession {
     if (/Enter all mandatory fields/i.test(text)) {
       return new SiteError('widgets_missing', msg('err.mandatory'));
     }
-    if (/booking (number|details).*(not|incorrect|invalid)|no booking|not (been )?found|could not (find|locate)/i.test(text)) {
+    if (/booking (number|details).*(not|incorrect|invalid)|no booking|not (been )?found|could not (find|locate|match|retrieve)/i.test(text)) {
       return new SiteError('bad_credentials', msg('kind.bad_credentials'));
     }
-    return new SiteError('unknown_page', msg('err.login_unknown'));
+    // 不知道网站到底怎么了：按访问失败处理，下一轮用全新会话重试，不让教练每次都来手动恢复
+    return new SiteError('timeout', msg('err.login_unknown_retry'));
   }
 
   /** 翻到包含 date 的那一周（站点一次显示一周） */
@@ -566,13 +587,19 @@ export class BrowserSession implements SiteSession {
     if (p && !p.domFresh) await this.go(page, p.url).catch(() => {});
     const kind = await this.waitKind(page, (k) => k !== 'unknown', 5_000);
     if (kind === 'main') return true;
+    if (kind === 'blocked') throw new SiteError('blocked', msg('kind.blocked'));
+    if (kind === 'captcha') throw new SiteError('captcha', msg('kind.captcha'));
     if (kind !== 'choose_location' && kind !== 'choose_time' && kind !== 'confirm') return false;
     this.pending = null;
     for (let i = 0; i < 4; i++) {
       const back = page.locator('#backButton');
       if ((await back.count()) === 0 || !(await back.first().isVisible().catch(() => false))) break;
       await this.clickAndLoad(page, '#backButton');
-      if ((await this.waitKind(page, (k) => k === 'main', 8_000)) === 'main') return true;
+      const after = await this.waitKind(page, (k) => k === 'main', 8_000);
+      if (after === 'main') return true;
+      if (after === 'blocked') throw new SiteError('blocked', msg('kind.blocked'));
+      if (after === 'captcha') throw new SiteError('captcha', msg('kind.captcha'));
+      break;
     }
     return (await this.currentKind(page)) === 'main';
   }

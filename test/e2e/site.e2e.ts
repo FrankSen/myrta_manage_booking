@@ -17,7 +17,7 @@ afterAll(() => rmSync(root, { recursive: true, force: true }));
 let site: MockMyrta;
 const sessions: BrowserSession[] = [];
 let n = 0;
-const open = (allowFinish = true, extra: { now?: () => number; currentRefreshMs?: number } = {}) => {
+const open = (allowFinish = true, extra: { now?: () => number; currentRefreshMs?: number; throttle?: () => Promise<void> } = {}) => {
   const s = new BrowserSession({ profileDir: join(root, `p${++n}`), allowFinish, home: site.url, ...extra });
   sessions.push(s);
   return s;
@@ -174,5 +174,27 @@ describe('BrowserSession × 假网站', () => {
     const err = await a.finish().catch((e: unknown) => e);
     expect((err as SiteError).kind).toBe('not_submitted');
     expect(site.finished).toEqual([]);
+  });
+
+  test('选位前考位被别人抢走：报 slot_gone（正常竞争），会话还能继续用', async () => {
+    const a = open();
+    await a.login('1111111111', 'Alpha');
+    await a.listSlots(241, '2026-12-07', '2026-12-13');
+    site.take(241, '2026-12-10', '09:00');
+    const err = await a.reachConfirm({ centreId: 241, date: '2026-12-10', time: '09:00' }).catch((e: unknown) => e);
+    expect((err as SiteError).kind).toBe('slot_gone');
+    // 同一个会话接着查照常
+    await a.login('1111111111', 'Alpha');
+    expect(await a.listSlots(241, '2026-12-14', '2026-12-20')).toContainEqual({ centreId: 241, date: '2026-12-17', time: '14:15' });
+  });
+
+  test('页面内请求经过限速：每次请求前都会调 throttle', async () => {
+    let n = 0;
+    const a = open(true, { throttle: async () => { n++; } });
+    await a.login('1111111111', 'Alpha');
+    await a.listSlots(241, '2026-12-07', '2026-12-13');
+    n = 0;
+    await a.listSlots(241, '2026-12-07', '2026-12-20'); // 跨两周：当前周刷新 + 翻一周
+    expect(n).toBeGreaterThanOrEqual(2);
   });
 });
