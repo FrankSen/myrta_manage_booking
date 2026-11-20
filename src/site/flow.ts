@@ -11,11 +11,6 @@ const HOME = 'https://www.myrta.com/';
 /** 站点有时很慢（实测首页 DOMContentLoaded 要 40 秒），超时要放宽；不等整页 load，只等文档可用 */
 const NAV_TIMEOUT = 90_000;
 
-/**
- * "Manage booking" 深链接。所有学员、所有会话共用一个，首次从首页抓到后缓存，
- * 之后直接跳转、省掉首页那一跳（2026-11-17 教练要求）。链接失效时回退到首页重新抓。按首页地址分开存
- */
-const cachedManageHref = new Map<string, string>();
 
 /**
  * 确认页（2026-11-19 联网实测，只勾选没提交）：联系电话"Use this number"单选框（默认已选中）、
@@ -116,11 +111,12 @@ export class BrowserSession implements SiteSession {
       this.loggedIn = false;
     }
 
-    // 先走缓存的 Manage booking 深链接，省掉首页那一跳；失效再回退到首页重新抓
-    const home = this.home();
-    if (!(await this.gotoLoginForm(page, cachedManageHref.get(home) ?? null))) {
-      cachedManageHref.delete(home);
-      if (!(await this.gotoLoginForm(page, null))) throw new SiteError('unknown_page', msg('err.no_manage_link'));
+    // 像真人一样：先开首页，再点 "Manage booking" 进登录页。不直接打开登录页地址（2026-11-20 教练要求，
+    // 直接访问深链接没有从首页来的痕迹，容易被站点防护拦）。登录表单没出来就从首页再走一次
+    if ((await this.gotoLoginForm(page)) !== 'ok') {
+      const second = await this.gotoLoginForm(page);
+      if (second === 'no_link') throw new SiteError('unknown_page', msg('err.no_manage_link'));
+      if (second === 'no_form') throw new SiteError('timeout', msg('err.no_login_form'));
     }
 
     const idBox = page.locator('#widget_input_bookingId');
@@ -408,41 +404,41 @@ export class BrowserSession implements SiteSession {
   }
 
   /**
-   * 走到登录表单页（Booking number / Family name 输入框出现）。
-   * href 有值：直接跳转这个深链接，省掉首页；href 为 null：从首页抓链接再跳并缓存。
-   * 表单没出现（链接失效或抓不到）返回 false，让调用方回退。被拦/验证码仍然抛错
+   * 从首页点 "Manage booking" 走到登录表单页（Booking number 输入框出现）。
+   * no_link：首页上一直没出现这个链接；no_form：点了但登录表单没出来。被拦/验证码抛错
    */
-  private async gotoLoginForm(page: Page, href: string | null): Promise<boolean> {
-    if (href) {
-      // 直接点这个链接会超时，取出地址直接跳转
-      await this.go(page, href);
-      await this.assertNotBlocked(page);
-      return this.loginFormVisible(page);
-    }
+  private async gotoLoginForm(page: Page): Promise<'ok' | 'no_link' | 'no_form'> {
     await this.go(page, this.home());
     await this.assertNotBlocked(page);
     // 站点慢的时候，正文先出来，链接要过一会儿才有，所以要等
-    let found: string | null = null;
-    for (let i = 0; i < 60 && !found; i++) {
-      found = await page.evaluate(() => {
-        const a = Array.from(document.querySelectorAll('a')).find((x) => /^\s*Manage booking\s*$/i.test(x.textContent ?? ''));
-        return a ? (a as HTMLAnchorElement).href : null;
-      }).catch(() => null);
-      if (!found) await page.waitForTimeout(1000);
+    const link = page.getByRole('link', { name: /^\s*Manage booking\s*$/i }).first();
+    try {
+      await link.waitFor({ state: 'visible', timeout: 60_000 });
+    } catch {
+      return 'no_link';
     }
-    if (!found) return false;
-    await this.go(page, found);
+    // 链接如果是在新标签页打开，改成在本页打开：后面所有操作都在这个页面上
+    await link.evaluate((a) => a.getAttribute('target') === '_blank' && a.removeAttribute('target')).catch(() => {});
+    // 点链接：noWaitAfter 不等跳转完成（站点慢时等跳转会让点击本身超时），跳转由下面等登录表单来判断。
+    // 正常点不上（被遮挡、还在动）就强制点
+    try {
+      await link.click({ timeout: 15_000, noWaitAfter: true });
+    } catch {
+      await link.click({ timeout: 15_000, noWaitAfter: true, force: true }).catch(() => {});
+    }
+    if (!(await this.loginFormVisible(page))) {
+      // 点击没触发跳转（页面还停在首页）：算没点到，交给调用方从首页再走一次
+      await this.assertNotBlocked(page);
+      return 'no_form';
+    }
     await this.assertNotBlocked(page);
-    if (!(await this.loginFormVisible(page))) return false;
-    // 抓到且确实走到登录表单才缓存，供下一个会话直接用
-    cachedManageHref.set(this.home(), found);
-    return true;
+    return 'ok';
   }
 
-  /** 登录表单的 Booking number 输入框是否在限时内出现 */
+  /** 登录表单的 Booking number 输入框是否在限时内出现。站点慢时登录页要几十秒，按页面跳转的超时等 */
   private async loginFormVisible(page: Page): Promise<boolean> {
     try {
-      await page.locator('#widget_input_bookingId').waitFor({ state: 'visible', timeout: 60_000 });
+      await page.locator('#widget_input_bookingId').waitFor({ state: 'visible', timeout: NAV_TIMEOUT });
       return true;
     } catch {
       return false;

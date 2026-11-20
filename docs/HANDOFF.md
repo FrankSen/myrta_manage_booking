@@ -160,6 +160,7 @@
 - **打开页面空白超时再试一次**：上面那条超时如果正文是空白（页面真没回来），`go()` 自动重试一次才报错，偶发的空响应不用等下一轮。
 - **让位 B 抢位提速（hot 模式）**：让位里接位的 B，每次停在选时间页的检查改成重新载入页面（`SiteSession.setHot`，`BrowserSession.hot`）而不是页面内请求。页面内请求后浏览器里显示的是旧的，抢位前要再载入一次整页（几秒到十几秒）；hot 之后页面一直是最新的，发现考位直接点格子。另外 A 点 Finish 看到成功页就立刻通知放出考位（`rebookSlot` 里 `finish()` 返回 success 就 `onReleased`），不再等十几秒的核实读取。抢位的发现路径没变（`released()` → `runNow`）。每轮检查变慢约一秒换抢位时省一次整页载入，只在让位期间生效。
 - **登录点 Continue 报"点了登录但没有反应"**（旧消息 `err.login_click_timeout`）：点击只等 8 秒 + 再观察 8 秒，站点慢或 Dojo 控件没初始化时就报错。现在点击 10 秒超时后强制点一次（不检查可点击性）再补按回车，然后交给 `waitForMain` 看 90 秒页面变化；旧消息已删，卡片上残留的是老错误记录。
+- **登录只从首页点进去**（教练要求，担心直接打开深链接被拦）：删掉 `cachedManageHref` 深链接缓存。每次登录都 `go(首页)` → 等 "Manage booking" 链接出现 → 真实点击（`noWaitAfter`，点不上就 `force`；`target=_blank` 改成本页打开）→ 等登录表单（按 `NAV_TIMEOUT` 90 秒）。表单没出来从首页再走一次，还不行报 `err.no_manage_link`（没链接）或 `err.no_login_form`（timeout 类，自动重试）。每次新会话登录多一次首页加载（站点慢时 8–40 秒）；会话复用、停在选时间页时不受影响。旧笔记"直接点会超时"是因为默认点击要等跳转完成，`noWaitAfter` 后不再有这个问题，**真实网站上还没验证点击**。
 - **让位：A 提交前等 B 准备好**：两个浏览器加载速度不同，A 走到确认页时 B 可能还在登录。现在自动提交前调 `beforeFinish` → `Service.waitHandoverReady`：B 最近 `HANDOVER_READY_MS`（1 分钟）内查过 A 的考点、浏览器开着、没停在确认页才算准备好（`listed` 由 `onListed` 记录，`dropSession` 时清掉）；没准备好就记日志、启动或 `runNow` B，每秒看一次，最多等 `HANDOVER_WAIT_MS`（3 分钟），等不到不提交、停在确认页交给教练（`status.handover_wait_timeout`）。站点会话空闲 15 分钟才失效，3 分钟内 A 的确认页还有效。
 - **添加学员对话框输入框点不中**：学员 Chrome 启动时用 `--start-minimized` 直接最小化（原来先弹出来抢前台焦点，过一两秒才最小化，期间主窗口的输入框点不中、打不了字）；对话框打开时主动聚焦第一个输入框。之前 CDP 连上后再最小化的兜底还在。
 - **自动改约开关也管让位**：以前让位双方不管开关都自动提交（`autoSubmit`），现在去掉，双方和普通学员一样只看 `autoRebookEnabled`。关闭时 A、B 都停在确认页等教练（"我已在网站提交"后 A 的原考位放出，B 立刻去抢）。
@@ -194,7 +195,7 @@
 2. 语言必须固定英文：`--lang=en-AU --accept-lang=en-AU,en`，环境变量 `LANG=en_AU.UTF-8`，启动后检查 `navigator.languages`。系统是中文时只传 `--lang` 不够，站点会返回无链接的中文页面，登录控件不初始化。
 3. `curl` 访问站点永远 403，不能用来判断站点是否可达。
 4. 站点很慢：首页 DOMContentLoaded 要 8–40 秒。超时 90 秒，只等 DOMContentLoaded，首页链接要轮询等待。
-5. 首页 "Manage booking" 链接要取出 `href` 再 `goto`，直接点会超时。登录用 `#widget_input_bookingId`、`#widget_input_familyName`，逐字输入。
+5. 首页 "Manage booking" 链接现在是真实点击（`noWaitAfter`，不等跳转完成），以前取 `href` 再 `goto` 是因为默认点击等跳转会超时。登录用 `#widget_input_bookingId`、`#widget_input_familyName`，逐字输入。
 6. "Change location" 是 Dojo 按钮 `#changeLocationButton_label`，不是链接。
 7. 期望日期 `#widget_rms_batDateSel` 必须键入，脚本赋值不生效且不报错；键入后读 `input[name=preferredDateStr]` 校验。键入后页面直接显示该日期所在的那一周。
 8. 考位格子 id `rms_<星期>_<时分>` 的时间是 12 小时制、不补零、无冒号：15:00 → `300`，13:15 → `115`，08:00 → `800`。

@@ -98,12 +98,16 @@ describe('BrowserSession × 假网站', () => {
     expect((err as SiteError).message).toMatch(/incorrect/);
   });
 
-  test('Manage booking 链接缓存：第二个会话不再访问首页', async () => {
+  test('每次登录都先开首页、点 Manage booking 进入，不直接打开登录页地址', async () => {
+    const homes = () => site.hits.filter((h) => h === '/').length;
+    const h0 = homes();
     await open().login('1111111111', 'Alpha');
-    const homeHits = site.hits.filter((h) => h === '/').length;
-    expect(homeHits).toBe(1);
+    expect(homes()).toBe(h0 + 1);
     await open().login('2222222222', 'Bravo');
-    expect(site.hits.filter((h) => h === '/').length).toBe(1);
+    expect(homes()).toBe(h0 + 2);
+    // 登录页都是从首页点过去的：每次访问登录页之前紧挨着一次首页
+    const seq = site.hits.filter((h) => h === '/' || h === '/tbs-change/');
+    for (let i = 0; i < seq.length; i++) if (seq[i] === '/tbs-change/' && seq[i - 1] !== '/tbs-change/') expect(seq[i - 1]).toBe('/');
   });
 
   test('停在选时间页：同一考点再查不点页面，直接在页面里请求，能看到新放出的考位', async () => {
