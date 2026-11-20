@@ -411,12 +411,16 @@ export class BrowserSession implements SiteSession {
     await this.go(page, this.home());
     await this.assertNotBlocked(page);
     // 站点慢的时候，正文先出来，链接要过一会儿才有，所以要等
-    const link = page.getByRole('link', { name: /^\s*Manage booking\s*$/i }).first();
+    // 用文字匹配 <a>，不用 getByRole('link')：真实首页上 getByRole 匹配不到这个链接（2026-11-20 实测数量为 0，
+    // 链接本身可见、有 href），用它会一直报"找不到链接"
+    const link = page.locator('a', { hasText: /^\s*Manage booking\s*$/i }).first();
     try {
       await link.waitFor({ state: 'visible', timeout: 60_000 });
     } catch {
       return 'no_link';
     }
+    const homeUrl = page.url();
+    const href = await link.evaluate((a) => (a as HTMLAnchorElement).href).catch(() => null);
     // 链接如果是在新标签页打开，改成在本页打开：后面所有操作都在这个页面上
     await link.evaluate((a) => a.getAttribute('target') === '_blank' && a.removeAttribute('target')).catch(() => {});
     // 点链接：noWaitAfter 不等跳转完成（站点慢时等跳转会让点击本身超时），跳转由下面等登录表单来判断。
@@ -427,9 +431,15 @@ export class BrowserSession implements SiteSession {
       await link.click({ timeout: 15_000, noWaitAfter: true, force: true }).catch(() => {});
     }
     if (!(await this.loginFormVisible(page))) {
-      // 点击没触发跳转（页面还停在首页）：算没点到，交给调用方从首页再走一次
       await this.assertNotBlocked(page);
-      return 'no_form';
+      // 点了没跳转：用刚从首页上读到的链接地址（不是写死的，也不缓存）带上首页作为来源再打开一次，和点击等效。
+      // 还不行交给调用方从首页再走一次
+      if (!href || page.url() !== homeUrl) return 'no_form';
+      await page.goto(href, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT, referer: homeUrl }).catch(() => {});
+      if (!(await this.loginFormVisible(page))) {
+        await this.assertNotBlocked(page);
+        return 'no_form';
+      }
     }
     await this.assertNotBlocked(page);
     return 'ok';
