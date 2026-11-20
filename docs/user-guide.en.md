@@ -159,16 +159,21 @@ B grab the slot the moment it's released:
    - B's target is set to A's current slot (same centre, date and time) automatically; it can't be changed during the handover.
    - Both A and B start refreshing. One-to-one: a student can only be in one handover.
 3. Then you don't need to watch:
-   - When A finds a slot for their own target, the app submits the rebooking itself (registered phone number, terms,
-     Finish) without stopping at the confirm page.
-   - The app reads A's booking back; once it has changed, B grabs A's old slot at once and submits automatically too.
-     If B was paused, it is started automatically.
+   - When A finds a slot for their own target, the app follows the "Auto-rebook" switch at the top: on, it submits the
+     rebooking itself (registered phone number, terms, Finish); off, it stops at the confirm page so you can submit in
+     the browser and then click "I submitted on the website".
+   - Before submitting automatically, the app checks that B's browser is logged in and has just checked A's centre.
+     If B is still loading, A waits at the confirm page (up to 3 minutes) and submits once B is ready; otherwise it
+     doesn't submit and leaves the confirm page for you.
+   - Once A's booking has changed, B grabs A's old slot at once and follows the same switch. If B was paused, it is
+     started automatically. With auto-rebook off B also stops at the confirm page; submit quickly, as someone else can
+     take the slot at any time.
    - If you or the student rebook A on the website instead, the app notices on A's next round and sends B in the same way.
    - Each result shows as a desktop notification and goes to Feishu. The handover ends once B has the slot.
 4. Changed your mind: click "Remove handover" on either card. B's target stays as A's old slot and can be changed.
 
 Notes:
-- Only students in a handover submit automatically; everyone else still stops at the confirm page for you.
+- Students in a handover follow the "Auto-rebook" switch like everyone else.
 - Automatic submitting has only been verified against a local simulated site so far; the real submit page hasn't been
   seen yet. The first time, have the coach present and use a booking that's safe to change (more than 48 hours away).
 - Once released, the slot is visible to everyone, so B getting it isn't guaranteed; if B misses it, B keeps refreshing

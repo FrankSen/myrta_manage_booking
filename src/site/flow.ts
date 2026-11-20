@@ -74,6 +74,8 @@ export class BrowserSession implements SiteSession {
   private creds: { bookingId: string; surname: string } | null = null;
   private parked: Parked | null = null;
   private throttle: (() => Promise<void>) | null = null;
+  /** hot 模式：停在选时间页时每次检查都重新载入页面，页面保持最新可点（让位接位的学员用） */
+  private hot = false;
   /** 最近一次读到的预约和读取时间：停在选时间页时 login() 直接返回它 */
   private current: BookingInfo | null = null;
   private currentAt = 0;
@@ -131,19 +133,17 @@ export class BrowserSession implements SiteSession {
     await page.keyboard.press('Tab');
     await page.waitForTimeout(500);
     const before = await page.innerText('body').catch(() => '');
-    // 站点慢时，点击后等页面跳转会超时（2026-11-19 实测 30 秒）。先点一下，如果点击本身超时，
-    // 再等一小会看是否其实点到了（页面已经跳转），没有再报超时。比直接吞掉更准
+    // 站点慢时按钮要等控件初始化好才能点，点击本身会超时；也可能点击其实生效了只是没跳转。
+    // 点一下后统一交给 waitForMain：每秒看页面，认出资料错误等提示立刻报错，认不出最多等 90 秒
+    const btn = page.locator('#searchBookingCriteria').getByRole('button', { name: /continue/i });
     try {
-      await page.locator('#searchBookingCriteria').getByRole('button', { name: /continue/i }).click({ timeout: 8_000 });
+      await btn.click({ timeout: 10_000 });
     } catch (err) {
       if (!/Timeout/i.test(String((err as Error)?.message ?? err))) throw err;
-      // 点击超时：可能网站慢、按钮点了没反应，也可能点击其实生效了只是没跳到。再等 8 秒
-      const after = await page.waitForURL(/tbs-change-main/, { timeout: 8_000 }).then(() => 'main' as const).catch(() => null);
-      if (after) {
-        this.loggedIn = true;
-        return this.readSummary(page);
-      }
-      throw new SiteError('timeout', msg('err.login_click_timeout'));
+      // 常规点击等"可点"超时（控件还没初始化、或被遮罩挡着）：强制点一次不检查可点击性，
+      // 再不行按回车像真人提交表单，然后交给 waitForMain 看结果
+      await btn.click({ timeout: 10_000, force: true }).catch(() => {});
+      await page.keyboard.press('Enter').catch(() => {});
     }
     await this.waitForMain(page, before);
     await page.waitForLoadState('domcontentloaded');
@@ -159,9 +159,19 @@ export class BrowserSession implements SiteSession {
       await this.openChooseTime(page, centreId, dateFrom);
       await this.park(page, centreId);
     }
-    const p = this.parked!;
+    let p = this.parked!;
     // 站点一次显示一周：先到开始那一周，再一周一周往后，直到超过结束日期
-    await this.moveTo(page, mondayOf(dateFrom));
+    const want = mondayOf(dateFrom);
+    if (this.hot) {
+      // hot：每次检查都重新载入页面，浏览器里显示的和站点一致，发现考位能立刻点（不用先载入）
+      if (p.week !== want) await this.moveTo(page, want);
+      if (!p.fresh || !p.domFresh || p.week !== want) {
+        await this.refreshParkDom(page);
+        p = this.parked!;
+      }
+    } else {
+      await this.moveTo(page, want);
+    }
     const result: Slot[] = [];
     const seen = new Set<string>();
     for (let guard = 0; guard < 20; guard++) {
@@ -185,8 +195,20 @@ export class BrowserSession implements SiteSession {
       this.lastListWeeks.push({ weekStart: p.week, total: raw.length, available: raw.filter((s) => s.available).length, inRange, noSlotsMessage: false });
       if (addDays(p.week, 7) > dateTo) break;
       await this.fetchWeek(page, 'next');
+      // hot：页面内请求过，浏览器里的页面已经不是最新的，重新载入成站点现在显示的那一周
+      if (this.hot) {
+        await this.refreshParkDom(page);
+        p = this.parked!;
+      }
     }
     return result;
+  }
+
+  /** hot 模式下：把浏览器重新载入成站点当前那一周的选时间页（页面内请求后浏览器里显示的是旧的） */
+  private async refreshParkDom(page: Page): Promise<void> {
+    const p = this.parked!;
+    await this.go(page, p.url);
+    await this.park(page, p.centreId);
   }
 
   async reachConfirm(slot: Slot): Promise<BookingInfo> {
@@ -194,12 +216,15 @@ export class BrowserSession implements SiteSession {
     // listSlots 刚读完：站点停在这个考点的选时间页。先让站点翻到考位那一周，再把页面重新载入成那一周，然后点格子
     const p = this.parked;
     if (p && p.centreId === slot.centreId) {
-      await this.moveTo(page, mondayOf(slot.date));
-      p.fresh = false;
-      if (!p.domFresh) {
-        await this.go(page, p.url);
-        await this.waitTimeslotsDom(page);
-        p.domFresh = true;
+      // hot：每次检查都重新载入过页面，浏览器就停在最新那一周，直接点格子，省掉抢位前的整页载入
+      if (!(this.hot && p.domFresh && p.week === mondayOf(slot.date))) {
+        await this.moveTo(page, mondayOf(slot.date));
+        p.fresh = false;
+        if (!p.domFresh) {
+          await this.go(page, p.url);
+          await this.waitTimeslotsDom(page);
+          p.domFresh = true;
+        }
       }
     }
     await this.expectKind(page, 'choose_time');
@@ -284,6 +309,10 @@ export class BrowserSession implements SiteSession {
 
   setThrottle(fn: () => Promise<void>): void {
     this.throttle = fn;
+  }
+
+  setHot(on: boolean): void {
+    this.hot = on;
   }
 
   async conceal(): Promise<void> {
@@ -527,14 +556,24 @@ export class BrowserSession implements SiteSession {
   }
 
   private async go(page: Page, url: string): Promise<void> {
-    try {
-      const res = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT });
-      if (res && res.status() === 403) throw new SiteError('blocked', msg('err.http_403'));
-    } catch (err) {
-      if (err instanceof SiteError) throw err;
-      const text = err instanceof Error ? err.message : String(err);
-      if (/ERR_CONNECTION_RESET|ERR_CONNECTION_CLOSED|ERR_EMPTY_RESPONSE/.test(text)) throw new SiteError('blocked', msg('err.conn_reset', { detail: text.split('\n')[0]! }));
-      throw new SiteError('timeout', msg('err.open_failed', { detail: text.split('\n')[0]! }));
+    // 正文空白才算真的没加载：再试一次，偶发的空响应重试多半能通
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const res = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT });
+        if (res && res.status() === 403) throw new SiteError('blocked', msg('err.http_403'));
+        return;
+      } catch (err) {
+        if (err instanceof SiteError) throw err;
+        const text = err instanceof Error ? err.message : String(err);
+        // 页面跳转超时：可能整个页面没回来，也可能文档和正文早好了，只是某个脚本或图片一直卡着，
+        // domcontentloaded 一直没触发。正文有内容就当加载完成继续走，后面登录框、考位数据都有自己的等待和判断
+        if (/timeout/i.test(text)) {
+          if ((await page.innerText('body').catch(() => '')).trim()) return;
+          if (attempt === 0) continue;
+        }
+        if (/ERR_CONNECTION_RESET|ERR_CONNECTION_CLOSED|ERR_EMPTY_RESPONSE/.test(text)) throw new SiteError('blocked', msg('err.conn_reset', { detail: text.split('\n')[0]! }));
+        throw new SiteError('timeout', msg('err.open_failed', { detail: text.split('\n')[0]! }));
+      }
     }
   }
 

@@ -49,7 +49,7 @@ async function boot(): Promise<void> {
     core = await startApp({
       runtimeDir: dataDir,
       centresFile: join(root, 'data', 'nsw-test-centres.json'),
-      // 自动改约默认开启，界面顶部可以关掉；让位的双方总是自动提交。见 src/main.ts
+      // 自动改约默认开启，界面顶部可以关掉；让位的双方同样跟这个开关走。见 src/main.ts
       openSession: async (_id, profileDir) => new BrowserSession({ profileDir, allowFinish: true }),
       cleanupBrowsers: (root) => cleanupOrphans(root),
       finishAvailable: true,

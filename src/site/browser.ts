@@ -69,6 +69,9 @@ export function launchArgs(port: number, profileDir: string): string[] {
     '--accept-lang=en-AU,en',
     '--no-first-run',
     '--no-default-browser-check',
+    // 不抢前台：窗口先起来再被最小化要过一两秒，这期间会抢主窗口的输入焦点（Windows 上表现为
+    // 主窗口的输入框点不中、打不了字）。加上这个 Chrome 启动时就是最小化
+    ...(process.env.MYRTA_MINIMIZE === '0' ? [] : ['--start-minimized']),
     // MYRTA_QUIET=0 时不加（排查站点拦截用）
     ...(process.env.MYRTA_QUIET === '0' ? [] : QUIET_ARGS),
     'about:blank',
@@ -133,6 +136,7 @@ export interface BrowserHandle {
  */
 export async function launchBrowser(profileDir: string, exe: string = realFindBrowser()): Promise<BrowserHandle> {
   const port = await freePort();
+  // Windows：--start-minimized 让新浏览器一启动就是最小化、不抢主窗口的输入焦点；之后 CDP 再最小化兜底
   const child: ChildProcess = spawn(exe, launchArgs(port, profileDir), { stdio: 'ignore', env: launchEnv(process.env) as NodeJS.ProcessEnv });
   let spawnError: Error | null = null;
   child.once('error', (e) => (spawnError = e));
@@ -169,6 +173,7 @@ export async function launchBrowser(profileDir: string, exe: string = realFindBr
     throw new SiteError('widgets_missing', msg('err.browser_lang', { langs: langs.join(',') }));
   }
   // 窗口最小化：5 个学员就是 5 个窗口，不最小化会挡住教练的屏幕。2026-11-16 实测最小化后登录、选考点、读考位都正常，站点不拦。
+  // 已经用 --start-minimized 启动了，这里再最小化一次兜底（有的平台不认这个参数）。
   // MYRTA_MINIMIZE=0 时不最小化（排查用）。最小化失败不影响使用
   if (process.env.MYRTA_MINIMIZE !== '0') await setWindowState(page, 'minimized');
   return {

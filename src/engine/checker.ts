@@ -32,7 +32,7 @@ export function newCheckState(): CheckState {
 
 export interface CheckDeps {
   repo: Repo;
-  limiter: Pick<Limiter, 'acquire' | 'reportBlocked' | 'reportOk'> & Partial<Pick<Limiter, 'waitBackoff'>>;
+  limiter: Pick<Limiter, 'acquire'>;
   clock: Clock;
   /** 程序退出或学员被暂停时触发，用来中断限速等待 */
   signal?: AbortSignal;
@@ -42,8 +42,6 @@ export interface CheckDeps {
   tolerance: Tolerance;
   centres: CentreIndex;
   autoRebookEnabled: boolean;
-  /** 这个学员是否自动提交（点 Finish），即使全局自动改约关闭。让位的双方是 */
-  autoSubmit?: (studentId: number) => boolean;
   notify(event: NotifyEvent): void;
   state: CheckState;
   /** 报告本轮正在做什么，界面显示用 */
@@ -52,6 +50,14 @@ export interface CheckDeps {
   onConfirmReady?: (studentId: number, slot: Slot) => Promise<void>;
   /** 学员的预约变了，原来的考位放回了网站（old 是原预约） */
   onReleased?: (studentId: number, old: BookingInfo) => void;
+  /** 某考点的考位刚读完（浏览器已登录、停在这个考点的选时间页） */
+  onListed?: (studentId: number, centreId: number) => void;
+  /**
+   * 自动提交前调用。让位的 A 要等 B 准备好（浏览器已登录、刚查过 A 的考点）再点 Finish，
+   * 否则 A 的原考位放出时 B 还在等网站响应，会被别人抢走。返回 null 表示可以提交，
+   * 返回文字表示不提交、停在确认页等教练（文字是原因）
+   */
+  beforeFinish?: (studentId: number, slot: Slot) => Promise<Text | null>;
 }
 
 /** continue：下一轮继续；stop：这个学员不用再排队了；hold：停在确认页等教练，不再排队，浏览器不关 */
@@ -97,11 +103,6 @@ function preflight(student: Student, current: BookingInfo, deps: CheckDeps): Tex
 async function runRound(student: Student, deps: CheckDeps): Promise<CheckOutcome> {
   const { repo, limiter, clock, tolerance, centres } = deps;
   const phase = (p: Text) => deps.onPhase?.(student.id, p);
-  // 网站刚拦截过：退避结束前连浏览器都不开、不登录。旧做法只在查考点前等，登录照样访问网站，拦截越来越长
-  if (limiter.waitBackoff) {
-    phase(msg('phase.backoff'));
-    await limiter.waitBackoff(deps.signal);
-  }
   phase(msg('phase.open_browser'));
   const session = await deps.getSession(student.id);
 
@@ -123,7 +124,7 @@ async function runRound(student: Student, deps: CheckDeps): Promise<CheckOutcome
     await limiter.acquire(deps.signal);
     phase(msg('phase.check', { centre: centreText(centreId, centres) }));
     const slots = await session.listSlots(centreId, from, to);
-    limiter.reportOk();
+    deps.onListed?.(student.id, centreId);
 
     const exact: Slot[] = [];
     const near: { slot: Slot; notes: Text[] }[] = [];
@@ -186,9 +187,16 @@ export async function rebookSlot(student: Student, slot: Slot, session: SiteSess
     );
   }
 
-  if (!deps.autoRebookEnabled && !deps.autoSubmit?.(student.id)) {
-    repo.setStatus(student.id, 'pending_confirm', msg('status.at_confirm', where));
-    repo.log(student.id, 'info', msg('log.exact_dry_run', where), clock.now());
+  // 自动改约开关对所有学员一样，包括让位的双方（2026-11-20 教练要求）
+  let holdNote: Text | null = deps.autoRebookEnabled ? null : msg('status.at_confirm', where);
+  // 让位的 A：B 没准备好就不提交，等它（最多几分钟），等不到就停在确认页交给教练
+  if (!holdNote && deps.beforeFinish) {
+    holdNote = await deps.beforeFinish(student.id, slot);
+    deps.onPhase?.(student.id, msg('phase.confirm', where));
+  }
+  if (holdNote) {
+    repo.setStatus(student.id, 'pending_confirm', holdNote);
+    repo.log(student.id, 'info', deps.autoRebookEnabled ? holdNote : msg('log.exact_dry_run', where), clock.now());
     deps.notify({ type: 'dry_run_ready', studentId: student.id, slot });
     await deps.onConfirmReady?.(student.id, slot);
     return 'hold';
@@ -197,8 +205,15 @@ export async function rebookSlot(student: Student, slot: Slot, session: SiteSess
   // 从这里开始，任何异常都意味着"可能已经提交"，不能当作普通失败重试
   let page: 'success' | 'failed' | 'unknown';
   let after: BookingInfo;
+  let released = false;
   try {
     page = await session.finish();
+    // 页面已经说成功了：原考位此刻多半已经放回网站。抢考位是分秒必争的，先通知让位方去抢，
+    // 不等下面再读一次预约核实（那次读取要十几秒），核实失败再照常报警
+    if (page === 'success') {
+      released = true;
+      deps.onReleased?.(student.id, student.current);
+    }
     after = await session.readCurrent();
   } catch (err) {
     // 点 Finish 之前就停下了（找不到电话选项、条款或按钮）：确定没有提交，不能说成"可能已提交"
@@ -213,7 +228,7 @@ export async function rebookSlot(student: Student, slot: Slot, session: SiteSess
     repo.setStatus(student.id, 'done', msg('status.rebooked', to));
     repo.log(student.id, 'info', msg('log.rebooked', to), clock.now());
     deps.notify({ type: 'rebooked', studentId: student.id, to: after });
-    deps.onReleased?.(student.id, student.current);
+    if (!released) deps.onReleased?.(student.id, student.current);
     await deps.dropSession(student.id);
     return 'stop';
   }
@@ -236,32 +251,29 @@ export async function reportError(student: Student, err: unknown, deps: CheckDep
   const message = errorText(err);
   const kind: SiteErrorKind = err instanceof SiteError ? err.kind : 'timeout';
 
-  if (kind === 'blocked') {
-    const wait = deps.limiter.reportBlocked();
-    repo.log(student.id, 'warn', msg('log.blocked_backoff', { kind: kindText('blocked'), min: Math.round(wait / 60_000) }), clock.now());
-    await deps.dropSession(student.id);
-    return 'continue';
-  }
-
-  // 浏览器窗口被关掉了（教练手动关的，或浏览器崩溃）：不是网站的问题，下一轮重新打开
+  // 浏览器窗口被关掉了（教练手动关的，或浏览器崩溃）：不是网站的问题，下一轮重新打开。
+  // 要放在 timeout 前面：页面操作的报错常常是 "has been closed"，不算临时失败
   if (!(err instanceof SiteError) && /has been closed|Target closed|Browser closed|browser has disconnected/i.test(String((err as Error)?.message ?? err))) {
     repo.log(student.id, 'warn', msg('log.browser_closed'), clock.now());
     await deps.dropSession(student.id);
     return 'continue';
   }
 
+  // 被站点拦下（403、连接被重置）：不再整体退避（教练要求，2026-11-20）。
+  // 和超时一样按临时失败处理：换全新会话按间隔重试，连续失败才暂停，避免封 IP 时空转。
+  // 真被封 IP 时教练重启路由器换出口即可
+  if (kind === 'blocked' || kind === 'timeout') {
+    const n = (deps.state.failStreak.get(student.id) ?? 0) + 1;
+    deps.state.failStreak.set(student.id, n);
+    repo.log(student.id, 'warn', msg('log.timeout_n', { kind: kindText(kind), n, detail: message }), clock.now());
+    await deps.dropSession(student.id);
+    if (n < MAX_TRANSIENT_FAILURES) return 'continue';
+  }
+
   // 考位被别人抢先：正常竞争，记下来继续刷新，不算失败
   if (kind === 'slot_gone') {
     repo.log(student.id, 'warn', msg('log.slot_gone'), clock.now());
     return 'continue';
-  }
-
-  if (kind === 'timeout') {
-    const n = (deps.state.failStreak.get(student.id) ?? 0) + 1;
-    deps.state.failStreak.set(student.id, n);
-    repo.log(student.id, 'warn', msg('log.timeout_n', { kind: kindText('timeout'), n, detail: message }), clock.now());
-    await deps.dropSession(student.id);
-    if (n < MAX_TRANSIENT_FAILURES) return 'continue';
   }
 
   const note = msg('status.error', { kind: kindText(kind), detail: message });

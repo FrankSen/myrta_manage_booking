@@ -158,20 +158,9 @@ function runLine(s) {
   return parts.length ? `<div class="run">${parts.join('')}</div>` : '';
 }
 
-function renderBackoff(until) {
-  const box = $('#backoff-box');
-  box.hidden = !until;
-  if (until) $('#backoff-msg').innerHTML = tr('backoff.title', { t: `<b data-backoff="${until}">${countdown(until - serverNow())}</b>`, at: esc(new Intl.DateTimeFormat('en-AU', { timeZone: 'Australia/Sydney', hourCycle: 'h23', hour: '2-digit', minute: '2-digit' }).format(new Date(until))) });
-}
-
 /** 每秒更新倒计时，不重新拉数据 */
 function tick() {
   for (const el of $$('[data-next]')) el.textContent = countdown(Number(el.dataset.next) - serverNow());
-  for (const el of $$('[data-backoff]')) {
-    const rest = Number(el.dataset.backoff) - serverNow();
-    if (rest <= 0) $('#backoff-box').hidden = true;
-    else el.textContent = countdown(rest);
-  }
   for (const el of $$('[data-hold]')) el.textContent = countdown(Number(el.dataset.hold) - serverNow());
   for (const el of $$('[data-meter]')) {
     const rest = Number(el.dataset.meter) - serverNow();
@@ -233,7 +222,6 @@ async function reload() {
   try {
     const [body, offers, l] = await Promise.all([api('GET', '/api/students'), api('GET', '/api/offers'), api('GET', '/api/logs')]);
     clockSkew = body.now - Date.now();
-    renderBackoff(body.backoffUntil);
     students = body.students; logs = l;
     const list = students;
     renderStats(list, offers); renderTodo(list, offers); renderStudents(list); renderLogFilter(); renderLogs();
@@ -315,7 +303,7 @@ $('#form-handover').addEventListener('submit', async (ev) => {
 
 // ---------- 添加学员 ----------
 
-$('#btn-add').onclick = () => { $('#form-add').reset(); $('#add-error').textContent = ''; $('#add-progress').hidden = true; $('#dlg-add').showModal(); };
+$('#btn-add').onclick = () => { $('#form-add').reset(); $('#add-error').textContent = ''; $('#add-progress').hidden = true; $('#dlg-add').showModal(); $('#form-add').elements.label.focus(); };
 let addReading = false;
 $('#form-add').addEventListener('submit', async (ev) => {
   if (ev.submitter?.value !== 'ok') return;

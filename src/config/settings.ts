@@ -11,9 +11,6 @@ export interface HiddenSettings {
   jitterRatio: number;
   /** 任意两次访问站点之间的最短间隔（毫秒），所有学员共用 */
   globalMinGapMs: number;
-  /** 遇到封锁后的首次退避时长（毫秒），之后每次翻倍 */
-  backoffBaseMs: number;
-  backoffMaxMs: number;
 }
 
 export interface Settings {
@@ -40,8 +37,7 @@ export const DEFAULT_SETTINGS: Settings = {
     jitterRatio: 0.2,
     // 全局最小访问间隔随之调小，否则 4-5 个学员排队会被这里卡住、达不到 5 秒节奏
     globalMinGapMs: 2_000,
-    backoffBaseMs: 5 * 60_000,
-    backoffMaxMs: 60 * 60_000,
+    // 被拦退避已按教练要求去掉（2026-11-20）：被拦按普通失败重试，封 IP 就换路由器出口
   },
   tolerance: { maxTimeMinutes: 60, maxDateDays: 0 },
   // 2026-11-19 教练要求默认开启：完全符合目标的考位自动提交。界面顶部可以随时关掉
@@ -81,8 +77,6 @@ export function mergeSettings(base: Settings, override: unknown): Settings {
       checkIntervalMs: num('hidden', h, 'checkIntervalMs', base.hidden.checkIntervalMs),
       jitterRatio: num('hidden', h, 'jitterRatio', base.hidden.jitterRatio),
       globalMinGapMs: num('hidden', h, 'globalMinGapMs', base.hidden.globalMinGapMs),
-      backoffBaseMs: num('hidden', h, 'backoffBaseMs', base.hidden.backoffBaseMs),
-      backoffMaxMs: num('hidden', h, 'backoffMaxMs', base.hidden.backoffMaxMs),
     },
     tolerance: {
       maxTimeMinutes: num('tolerance', t, 'maxTimeMinutes', base.tolerance.maxTimeMinutes),

@@ -152,6 +152,19 @@
 - 拿到的不是选时间页时（`parked_lost`）同时清掉 `current`，下一轮强制重新登录。
 - 端到端测试 13 个（`npm run test:e2e`，约 2.5 分钟）。工具有超时限制时放后台跑：`nohup npx vitest run -c vitest.e2e.config.ts > /tmp/e2e.log &`。
 
+## 2026-11-20：教练在澳洲实测的三个问题
+
+- **添加学员报"打开页面失败：Timeout 90000ms exceeded"**：`go()` 等 `domcontentloaded` 90 秒。很可能是页面正文早好了、只是某个脚本或图片（谷歌地图、遥测）一直卡着，整个事件没触发。现在超时后先看页面：正文有内容就当加载完成继续走（后面登录框、考位数据都有自己的等待），正文空才报错。
+- **被拦退避整个去掉**（教练要求："理论上没啥作用，真封了 IP 重启路由器就行"）：`Limiter` 只剩 `acquire`/`waitLeft`；`reportBlocked`/`reportOk`/`waitBackoff`/`backoffUntil` 和界面退避横幅全部删除；`hidden.backoffBaseMs/backoffMaxMs` 配置不再读。被拦（`blocked`）和超时一样按临时失败处理：记 failStreak、关浏览器、下一轮全新会话照常开，连续 3 次才暂停。放弃确认页时不再判断退避。
+- **暂停后点"继续"有时立刻又报错**：暂停时会立刻关浏览器，但旧 Chrome 退出要几秒；新会话在旧进程还没退出时用同一资料目录开 Chrome，新实例会把请求转交旧进程后自己退出，调试端口连不上报 `browser_no_response`。修复：`getSession` 等这个学员的浏览器关完（`pendingClose`）再开新的；`runCheck`/`doAccept` 收尾删中断器时只在还是自己的那个才删，避免旧操作把新操作的删掉。
+- **打开页面空白超时再试一次**：上面那条超时如果正文是空白（页面真没回来），`go()` 自动重试一次才报错，偶发的空响应不用等下一轮。
+- **让位 B 抢位提速（hot 模式）**：让位里接位的 B，每次停在选时间页的检查改成重新载入页面（`SiteSession.setHot`，`BrowserSession.hot`）而不是页面内请求。页面内请求后浏览器里显示的是旧的，抢位前要再载入一次整页（几秒到十几秒）；hot 之后页面一直是最新的，发现考位直接点格子。另外 A 点 Finish 看到成功页就立刻通知放出考位（`rebookSlot` 里 `finish()` 返回 success 就 `onReleased`），不再等十几秒的核实读取。抢位的发现路径没变（`released()` → `runNow`）。每轮检查变慢约一秒换抢位时省一次整页载入，只在让位期间生效。
+- **登录点 Continue 报"点了登录但没有反应"**（旧消息 `err.login_click_timeout`）：点击只等 8 秒 + 再观察 8 秒，站点慢或 Dojo 控件没初始化时就报错。现在点击 10 秒超时后强制点一次（不检查可点击性）再补按回车，然后交给 `waitForMain` 看 90 秒页面变化；旧消息已删，卡片上残留的是老错误记录。
+- **让位：A 提交前等 B 准备好**：两个浏览器加载速度不同，A 走到确认页时 B 可能还在登录。现在自动提交前调 `beforeFinish` → `Service.waitHandoverReady`：B 最近 `HANDOVER_READY_MS`（1 分钟）内查过 A 的考点、浏览器开着、没停在确认页才算准备好（`listed` 由 `onListed` 记录，`dropSession` 时清掉）；没准备好就记日志、启动或 `runNow` B，每秒看一次，最多等 `HANDOVER_WAIT_MS`（3 分钟），等不到不提交、停在确认页交给教练（`status.handover_wait_timeout`）。站点会话空闲 15 分钟才失效，3 分钟内 A 的确认页还有效。
+- **添加学员对话框输入框点不中**：学员 Chrome 启动时用 `--start-minimized` 直接最小化（原来先弹出来抢前台焦点，过一两秒才最小化，期间主窗口的输入框点不中、打不了字）；对话框打开时主动聚焦第一个输入框。之前 CDP 连上后再最小化的兜底还在。
+- **自动改约开关也管让位**：以前让位双方不管开关都自动提交（`autoSubmit`），现在去掉，双方和普通学员一样只看 `autoRebookEnabled`。关闭时 A、B 都停在确认页等教练（"我已在网站提交"后 A 的原考位放出，B 立刻去抢）。
+- 端到端测试 13 个全过；改开关逻辑后单独重跑了 A→B 让位全流程（开关开启），通过。
+
 ## 下一步（按顺序）
 
 1. **在真实 Windows 上走一遍**：解压 zip，双击 `MyRTA Rebook.exe`，看 SmartScreen 提示、快捷方式、中文显示（英文 Windows 也要看）、能找到 Chrome/Edge、添加学员能读到预约、关窗口后浏览器都关了、iOA 弹窗是否减少。

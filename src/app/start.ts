@@ -167,9 +167,9 @@ export async function startApp(opts: AppOptions): Promise<App> {
           void probeSession?.close().catch(() => {});
         },
         fetchCurrent: (bookingId, surname): Promise<BookingInfo> => {
-          // 网站刚拦截过、正在整体退避：不要让教练干等十几分钟，直接说明
+          // 别的学员正占着访问间隔、排队要等太久：不要让教练干等，直接说明
           const left = limiter.waitLeft();
-          if (left > PROBE_MAX_WAIT_MS) return Promise.reject(new TextError(msg('err.probe_backoff', { min: Math.ceil(left / 60_000) })));
+          if (left > PROBE_MAX_WAIT_MS) return Promise.reject(new TextError(msg('err.probe_busy', { min: Math.ceil(left / 60_000) })));
           const cancel = new AbortController();
           probeCancel = cancel;
           const run = probeQueue.then(async () => {

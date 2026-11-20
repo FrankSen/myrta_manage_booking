@@ -188,17 +188,6 @@ describe('添加学员时的临时读取', () => {
     expect(app.repo.listStudents()).toHaveLength(0);
   });
 
-  test('网站刚拦截、正在整体退避：不排队干等，直接说明还要等多久', async () => {
-    const d = dir();
-    let opened = 0;
-    app = await startApp({ runtimeDir: d, centresFile, openWindow: () => null, settings, openSession: async () => { opened++; return new FakeSession(); } });
-    (app as unknown as { service: { deps: { limiter: { reportBlocked(): number } } } }).service.deps.limiter.reportBlocked();
-    const r = await post(app, '1234567890');
-    expect(r.status).toBe(422);
-    expect(render('zh', (await r.json()).error)).toContain('还要约 5 分钟');
-    expect(opened).toBe(0);
-  });
-
   test('用 probe 目录，同时添加两个学员时排队，不会同时开两个浏览器；每次清空上一次的登录状态', async () => {
     const d = dir();
     let open = 0;

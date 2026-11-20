@@ -1,4 +1,5 @@
-// 让位：A 改约后，原考位由 B 立即去抢（2026-11-19 教练要求）。一对一；B 的目标固定为 A 的考位；双方自动提交
+// 让位：A 改约后，原考位由 B 立即去抢（2026-11-19 教练要求）。一对一；B 的目标固定为 A 的考位；
+// 是否自动提交跟全局自动改约开关走（2026-11-20 教练要求）
 import { randomBytes } from 'node:crypto';
 import { describe, expect, test } from 'vitest';
 import { DEFAULT_SETTINGS, type Settings } from '../src/config/settings.ts';
@@ -82,7 +83,7 @@ function setup(settings: Partial<Settings> = {}) {
   const merged: Settings = { ...DEFAULT_SETTINGS, autoRebookEnabled: false, ...settings, hidden: { ...DEFAULT_SETTINGS.hidden, checkIntervalMs: 2 * MIN, globalMinGapMs: 20_000 } };
   const service = new Service({
     repo, clock, settings: merged, centres,
-    limiter: { acquire: async () => {}, reportBlocked: () => 5 * MIN, reportOk: () => {} },
+    limiter: { acquire: async () => {} },
     openSession: async (id) => {
       const s = new SharedSession(site, id);
       sessions.set(id, s);
@@ -103,7 +104,7 @@ function setup(settings: Partial<Settings> = {}) {
 }
 
 describe('设置让位', () => {
-  test('设好后：B 的目标改为 A 的考位，A、B 都开始刷新，都自动提交', async () => {
+  test('设好后：B 的目标改为 A 的考位，A、B 都开始刷新', async () => {
     const t = setup();
     expect(t.service.setHandover(t.a, t.b)).toBe('ok');
     const b = t.repo.getStudent(t.b)!;
@@ -111,7 +112,6 @@ describe('设置让位', () => {
     expect(t.repo.getStudent(t.a)!.handoverTo).toBe(t.b);
     expect(t.repo.handoverFrom(t.b)!.id).toBe(t.a);
     expect(t.service.activeIds().sort()).toEqual([t.a, t.b].sort());
-    expect([t.service.autoSubmit(t.a), t.service.autoSubmit(t.b)]).toEqual([true, true]);
     expect(t.logs(t.b).some((l) => l.includes('接 A 的考位'))).toBe(true);
     await t.service.stopAll();
   });
@@ -148,12 +148,11 @@ describe('设置让位', () => {
     expect(t.service.activeIds()).toEqual([]);
   });
 
-  test('解除后：不再自动提交；删除 B 时 A 的让位一起清掉', async () => {
+  test('解除后：双方不再关联；删除 B 时 A 的让位一起清掉', async () => {
     const t = setup();
     t.service.setHandover(t.a, t.b);
     expect(t.service.setHandover(t.a, null)).toBe('ok');
     expect(t.repo.getStudent(t.a)!.handoverTo).toBeNull();
-    expect([t.service.autoSubmit(t.a), t.service.autoSubmit(t.b)]).toEqual([false, false]);
     t.service.setHandover(t.a, t.b);
     t.service.pauseStudent(t.b);
     t.repo.deleteStudent(t.b);
@@ -162,9 +161,10 @@ describe('设置让位', () => {
   });
 });
 
-describe('让位全流程', () => {
+describe('让位全流程（自动改约开启）', () => {
+  const setupOn = () => setup({ autoRebookEnabled: true });
   test('A 找到目标考位 → 软件替 A 提交 → B 立刻抢到 A 的原考位并提交 → 让位完成', async () => {
-    const t = setup();
+    const t = setupOn();
     t.service.setHandover(t.a, t.b);
     await t.clock.advance(0);
     // 第一轮：A 的目标没有考位，B 盯着的 A 原考位还被 A 占着
@@ -175,7 +175,7 @@ describe('让位全流程', () => {
     t.service.checkNow(t.a);
     await t.clock.advance(0);
 
-    // A：自动提交（全局自动改约是关的），核实成功
+    // A：自动提交，核实成功
     expect(t.repo.getStudent(t.a)!.status).toBe('done');
     expect(t.repo.getStudent(t.a)!.current).toEqual({ centreName: SILVERWATER_NAME, date: A_NEW.date, time: A_NEW.time });
     // B：不等下一轮，立刻抢到 A 的原考位
@@ -195,7 +195,7 @@ describe('让位全流程', () => {
   });
 
   test('A 自己在网站上改约（软件外）：A 下一轮发现预约变了，B 立刻去抢', async () => {
-    const t = setup();
+    const t = setupOn();
     t.service.setHandover(t.a, t.b);
     await t.clock.advance(0);
     // 模拟 A 在网站上自己改到了别的考位，原考位放回
@@ -210,21 +210,25 @@ describe('让位全流程', () => {
   });
 
   test('A 让出时 B 被暂停了：自动启动 B 去抢', async () => {
-    const t = setup();
+    const t = setupOn();
     t.service.setHandover(t.a, t.b);
     await t.clock.advance(0);
     t.service.pauseStudent(t.b);
     await t.clock.advance(0);
     t.site.open(A_NEW);
     t.service.checkNow(t.a);
+    // A 停在确认页先等：B 被暂停了，先启动 B，B 查过 A 的考点后 A 才提交
     await t.clock.advance(0);
+    expect(t.site.submits).toEqual([]);
+    await t.clock.advance(5_000);
+    expect(t.repo.getStudent(t.a)!.status).toBe('done');
     expect(t.repo.getStudent(t.b)!.status).toBe('done');
     expect(t.repo.getStudent(t.b)!.current).toEqual(A_SLOT);
     await t.service.stopAll();
   });
 
   test('原考位被别人先抢走：B 提交失败，继续刷新盯着这个考位', async () => {
-    const t = setup();
+    const t = setupOn();
     t.service.setHandover(t.a, t.b);
     await t.clock.advance(0);
     t.site.open(A_NEW);
@@ -249,8 +253,8 @@ describe('让位全流程', () => {
     expect(t.repo.getStudent(t.b)!.status).toBe('running');
     expect(t.repo.getStudent(t.b)!.current).toEqual(B_SLOT);
     expect(t.service.activeIds()).toContain(t.b);
-    // 还在让位里，下次考位再出现照样自动提交
-    expect(t.service.autoSubmit(t.b)).toBe(true);
+    // 还在让位里，下次考位再出现照样去抢
+    expect(t.repo.handoverFrom(t.b)!.id).toBe(t.a);
     await t.service.stopAll();
   });
 
@@ -265,6 +269,121 @@ describe('让位全流程', () => {
     expect(t.repo.getStudent(c)!.status).toBe('pending_confirm');
     expect(t.site.submits).toEqual([]);
     expect(t.sessions.get(c)!.calls).not.toContain('finish');
+    await t.service.stopAll();
+  });
+});
+
+describe('让位全流程（自动改约关闭）', () => {
+  test('双方都停在确认页等教练：A 在浏览器提交并点"我已在网站提交"后，B 立刻去抢，也停在确认页', async () => {
+    const t = setup();
+    t.service.setHandover(t.a, t.b);
+    await t.clock.advance(0);
+    t.site.open(A_NEW);
+    t.service.checkNow(t.a);
+    await t.clock.advance(0);
+    // A：走到确认页停下，没有提交
+    expect(t.repo.getStudent(t.a)!.status).toBe('pending_confirm');
+    expect(t.service.holdInfo(t.a)).not.toBeNull();
+    expect(t.site.submits).toEqual([]);
+    expect(t.sessions.get(t.a)!.calls).not.toContain('finish');
+    expect(t.repo.getStudent(t.b)!.status).toBe('running');
+
+    // 教练在 A 的浏览器里点了 Finish，再点"我已在网站提交"
+    await t.sessions.get(t.a)!.finish();
+    expect(await t.service.endHold(t.a, 'submitted')).toBe('rebooked');
+    await t.clock.advance(0);
+    expect(t.repo.getStudent(t.a)!.status).toBe('done');
+    // B：立刻去抢 A 的原考位，同样停在确认页等教练
+    expect(t.repo.getStudent(t.b)!.status).toBe('pending_confirm');
+    expect(t.service.holdInfo(t.b)!.slot).toEqual({ centreId: SILVERWATER, date: A_SLOT.date, time: A_SLOT.time });
+    expect(t.site.submits).toEqual([t.a]);
+    expect(t.sessions.get(t.b)!.calls).not.toContain('finish');
+
+    // 教练给 B 提交后，让位完成
+    await t.sessions.get(t.b)!.finish();
+    expect(await t.service.endHold(t.b, 'submitted')).toBe('rebooked');
+    expect(t.repo.getStudent(t.b)!.current).toEqual(A_SLOT);
+    expect(t.repo.getStudent(t.a)!.handoverTo).toBeNull();
+    await t.service.stopAll();
+  });
+
+  test('运行中切换开关：下一轮起生效，让位的学员也一样', async () => {
+    const t = setup({ autoRebookEnabled: true });
+    t.service.setHandover(t.a, t.b);
+    await t.clock.advance(0);
+    t.service.setAutoRebook(false);
+    t.site.open(A_NEW);
+    t.service.checkNow(t.a);
+    await t.clock.advance(0);
+    expect(t.repo.getStudent(t.a)!.status).toBe('pending_confirm');
+    expect(t.site.submits).toEqual([]);
+    await t.service.stopAll();
+  });
+});
+
+describe('让位：A 提交前等 B 准备好', () => {
+  test('B 刚查过 A 的考点：A 直接提交，不等', async () => {
+    const t = setup({ autoRebookEnabled: true });
+    t.service.setHandover(t.a, t.b);
+    await t.clock.advance(0);
+    t.site.open(A_NEW);
+    t.service.checkNow(t.a);
+    await t.clock.advance(0);
+    expect(t.site.submits).toEqual([t.a, t.b]);
+    expect(t.logs(t.a).some((l) => l.includes('还没准备好'))).toBe(false);
+    await t.service.stopAll();
+  });
+
+  test('B 的浏览器还没准备好：A 停在确认页等，B 查过 A 的考点后才提交', async () => {
+    const t = setup({ autoRebookEnabled: true });
+    t.service.setHandover(t.a, t.b);
+    await t.clock.advance(0);
+    // B 的浏览器还在登录、等网站响应（只拖慢 B）
+    let release!: () => void;
+    const slow = new Promise<void>((r) => (release = r));
+    const sb = t.sessions.get(t.b)!;
+    const orig = sb.login.bind(sb);
+    sb.login = async () => {
+      await slow;
+      return orig();
+    };
+    {
+      (t.service as unknown as { listed: Map<number, unknown> }).listed.delete(t.b);
+      t.service.checkNow(t.b); // B 开始新一轮，卡在登录
+      await t.clock.advance(0);
+      t.site.open(A_NEW);
+      t.service.checkNow(t.a);
+      await t.clock.advance(10_000);
+      expect(t.site.submits).toEqual([]);
+      expect(t.logs(t.a).some((l) => l.includes('还没准备好'))).toBe(true);
+      expect(render('zh', t.service.progress(t.a)!.phase)).toContain('等 B');
+      release();
+      await t.clock.advance(3_000);
+      expect(t.site.submits).toEqual([t.a, t.b]);
+      expect(t.repo.getStudent(t.b)!.current).toEqual(A_SLOT);
+      expect(t.logs(t.a).some((l) => l.includes('B 已准备好'))).toBe(true);
+    }
+    await t.service.stopAll();
+  });
+
+  test('等了 3 分钟 B 还没好：A 不提交，停在确认页交给教练', async () => {
+    const t = setup({ autoRebookEnabled: true });
+    t.service.setHandover(t.a, t.b);
+    await t.clock.advance(0);
+    const sb = t.sessions.get(t.b)!;
+    sb.login = () => new Promise<BookingInfo>(() => {}); // B 一直卡在登录
+    {
+      (t.service as unknown as { listed: Map<number, unknown> }).listed.delete(t.b);
+      t.service.checkNow(t.b);
+      await t.clock.advance(0);
+      t.site.open(A_NEW);
+      t.service.checkNow(t.a);
+      await t.clock.advance(3 * MIN + 2_000);
+      expect(t.site.submits).toEqual([]);
+      expect(t.repo.getStudent(t.a)!.status).toBe('pending_confirm');
+      expect(render('zh', t.repo.getStudent(t.a)!.statusNote)).toContain('还没准备好，没有提交');
+      expect(t.service.holdInfo(t.a)).not.toBeNull();
+    }
     await t.service.stopAll();
   });
 });

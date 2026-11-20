@@ -22,5 +22,10 @@ export interface SiteSession {
   conceal?(): Promise<void>;
   /** 页面内直接发请求时，每次请求前调用（全局限速）。生产装配时挂上 */
   setThrottle?(fn: () => Promise<void>): void;
+  /**
+   * 开启后停在选时间页时每次检查都重新载入页面（而不是页面内请求），让浏览器里的页面保持最新，
+   * 发现考位能立刻点，省掉抢位前的那次整页载入。让位时抢位的学员开启
+   */
+  setHot?(on: boolean): void;
   close(): Promise<void>;
 }

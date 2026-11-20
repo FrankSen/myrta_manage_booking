@@ -92,7 +92,6 @@ export interface Harness {
   session: FakeSession;
   events: NotifyEvent[];
   acquired: number;
-  blocked: number;
   dropped: number;
   studentId: number;
 }
@@ -111,14 +110,12 @@ export function harness(opts: { autoRebook?: boolean; target?: Target; current?:
   });
   repo.setStatus(studentId, opts.status ?? 'running');
 
-  const h = { events: [] as NotifyEvent[], acquired: 0, blocked: 0, dropped: 0 };
+  const h = { events: [] as NotifyEvent[], acquired: 0, dropped: 0 };
   const deps: CheckDeps = {
     repo,
     clock,
     limiter: {
       acquire: async () => void h.acquired++,
-      reportBlocked: () => (h.blocked++, 5 * 60_000),
-      reportOk: () => {},
     },
     getSession: async () => session,
     dropSession: async () => void h.dropped++,

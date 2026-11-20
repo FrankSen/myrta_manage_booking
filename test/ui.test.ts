@@ -18,7 +18,7 @@ afterEach(async () => {
 async function setup(opts: { fetchCurrent?: () => Promise<{ centreName: string; date: string; time: string }>; openSite?: () => void; feishu?: { get(): string; set(url: string): void } } = {}) {
   const repo = new Repo(openDb(':memory:'), randomBytes(32));
   const clock = new FakeClock(NOW);
-  const limiter = { acquire: async () => {}, reportBlocked: () => 1, reportOk: () => {} };
+  const limiter = { acquire: async () => {} };
   const service = new Service({
     // 界面测试按自动改约关闭（停在确认页）；生产默认已开启
     repo, clock, limiter, settings: { ...DEFAULT_SETTINGS, autoRebookEnabled: false }, centres,

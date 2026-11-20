@@ -197,7 +197,6 @@ legend { font-weight: 600; padding: 0 4px; }
 
 /* 授权 */
 .license { border-left: 6px solid var(--stop); }
-.backoff { border-left: 6px solid var(--wait); }
 .file-btn { display: inline-block; padding: 6px 16px; border-radius: 8px; cursor: pointer; }
 .file-btn.primary { background: var(--sign); color: #fff; font-weight: 600; }
 .file-btn.primary:hover { background: var(--sign-dark); }

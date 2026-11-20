@@ -55,27 +55,6 @@ describe('Limiter', () => {
     expect(times).toEqual([1_000_000, 1_000_000 + H.globalMinGapMs, 1_000_000 + 2 * H.globalMinGapMs]);
   });
 
-  test('退避结束后又被拦：5、10、20、40、60 分钟，到上限后不再增加；reportOk 后重置', async () => {
-    const { clock, limiter } = mk();
-    for (const m of [5, 10, 20, 40, 60, 60]) {
-      expect(limiter.reportBlocked()).toBe(m * MIN);
-      await clock.advance(m * MIN);
-    }
-    limiter.reportOk();
-    expect(limiter.reportBlocked()).toBe(5 * MIN);
-  });
-
-  test('退避期间 acquire 一直等待，期满后放行', async () => {
-    const { clock, limiter } = mk();
-    const wait = limiter.reportBlocked();
-    let ok = false;
-    void limiter.acquire().then(() => (ok = true));
-    await clock.advance(wait - 1);
-    expect(ok).toBe(false);
-    await clock.advance(1);
-    expect(ok).toBe(true);
-  });
-
   test('acquire 可被取消', async () => {
     const { limiter } = mk();
     await limiter.acquire();
@@ -246,45 +225,5 @@ describe('Scheduler：间隔可调与运行信息', () => {
     sch.reschedule(1);
     await clock.advance(0);
     expect(calls).toEqual([0, 4 * MIN]);
-  });
-});
-
-describe('Limiter 退避', () => {
-  const mk = () => {
-    const clock = new FakeClock(1_000_000);
-    return { clock, limiter: new Limiter(clock, H) };
-  };
-  test('waitBackoff：没被拦时立刻返回，不占访问间隔', async () => {
-    const { clock, limiter } = mk();
-    await limiter.waitBackoff();
-    let ok = false;
-    void limiter.acquire().then(() => (ok = true));
-    await clock.advance(0);
-    expect(ok).toBe(true);
-  });
-  test('waitBackoff：被拦后一直等到退避结束', async () => {
-    const { clock, limiter } = mk();
-    const wait = limiter.reportBlocked();
-    expect(limiter.backoffUntil()).toBe(clock.now() + wait);
-    let ok = false;
-    void limiter.waitBackoff().then(() => (ok = true));
-    await clock.advance(wait - 1);
-    expect(ok).toBe(false);
-    await clock.advance(1);
-    expect(ok).toBe(true);
-    expect(limiter.backoffUntil()).toBeNull();
-  });
-  test('退避期间又报被拦（同一次拦截里别的学员也碰上了）：不翻倍', () => {
-    const { clock, limiter } = mk();
-    expect(limiter.reportBlocked()).toBe(5 * MIN);
-    void clock;
-    expect(limiter.reportBlocked()).toBe(5 * MIN);
-    expect(limiter.backoffUntil()).toBe(1_000_000 + 5 * MIN);
-  });
-  test('退避结束后再被拦才翻倍', async () => {
-    const { clock, limiter } = mk();
-    expect(limiter.reportBlocked()).toBe(5 * MIN);
-    await clock.advance(5 * MIN);
-    expect(limiter.reportBlocked()).toBe(10 * MIN);
   });
 });

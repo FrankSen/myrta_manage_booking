@@ -38,8 +38,8 @@ test('A→B 让位：软件替 A 改约，B 立刻抢到 A 的原考位，全程
   const events: NotifyEvent[] = [];
   const service = new Service({
     repo, clock: realClock, centres,
-    settings: { ...DEFAULT_SETTINGS, autoRebookEnabled: false, hidden: { ...DEFAULT_SETTINGS.hidden, globalMinGapMs: 500 } },
-    limiter: { acquire: async () => {}, reportBlocked: () => 60_000, reportOk: () => {} },
+    settings: { ...DEFAULT_SETTINGS, autoRebookEnabled: true, hidden: { ...DEFAULT_SETTINGS.hidden, globalMinGapMs: 500 } },
+    limiter: { acquire: async () => {} },
     openSession: async (id) => new BrowserSession({ profileDir: join(root, `s${id}`), allowFinish: true, home: site.url }),
     notify: (e) => events.push(e),
   });

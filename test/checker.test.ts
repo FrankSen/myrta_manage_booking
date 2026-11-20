@@ -178,11 +178,11 @@ describe('过滤与待确认', () => {
 });
 
 describe('错误处理', () => {
-  test('被拦截：全局退避一次，学员保持 running，下一轮继续', async () => {
+  test('被拦截：记一次失败、换全新会话，学员保持 running 继续刷新（不再退避）', async () => {
     const h = harness();
     h.session.loginError = siteError('blocked');
     expect(await checkStudent(h.studentId, h.deps)).toBe('continue');
-    expect(h.blocked).toBe(1);
+    expect(h.deps.state.failStreak.get(h.studentId)).toBe(1);
     expect(h.dropped).toBe(1);
     expect(h.repo.getStudent(h.studentId)!.status).toBe('running');
     expect(h.events).toEqual([]);

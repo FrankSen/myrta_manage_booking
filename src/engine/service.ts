@@ -14,7 +14,7 @@ import { checkStudent, newCheckState, reportError, rebookSlot, slotKey, visitsPe
 export interface ServiceDeps {
   repo: Repo;
   clock: Clock;
-  limiter: Pick<Limiter, 'acquire' | 'reportBlocked' | 'reportOk'> & Partial<Pick<Limiter, 'waitBackoff' | 'backoffUntil'>>;
+  limiter: Pick<Limiter, 'acquire'>;
   settings: Settings;
   centres: CentreIndex;
   /** 为某个学员创建站点会话（打开独立浏览器） */
@@ -67,6 +67,14 @@ export type HandoverResult = 'ok' | 'no_student' | 'same' | 'done' | 'taken' | '
 /** 原考位放出后，过多久再补查一次（站点放回考位可能有延迟） */
 export const RELEASE_RECHECK_MS = 60_000;
 
+/**
+ * 让位：A 提交前，B 最近一次查过 A 的考点要在这个时间内，才算 B 准备好了
+ * （浏览器已登录、停在那个考点的选时间页，A 一放出 B 马上能抢）
+ */
+export const HANDOVER_READY_MS = 60_000;
+/** 让位：A 停在确认页最多等 B 多久。等不到就不提交，停在确认页交给教练 */
+export const HANDOVER_WAIT_MS = 3 * 60_000;
+
 interface Hold {
   slot: Slot;
   until: number;
@@ -83,12 +91,16 @@ export class Service {
   private readonly sessions = new Map<number, SiteSession>();
   /** 正在关闭的浏览器。退出时要等它们关完，否则程序先退出，浏览器会留在后台 */
   private readonly closing = new Set<Promise<void>>();
+  /** 正在关闭的学员浏览器：新浏览器要等它关完再开（同一资料目录，旧 Chrome 还在时会顶替新实例） */
+  private readonly pendingClose = new Map<number, Promise<void>>();
   private readonly locks = new Map<number, Promise<unknown>>();
   private readonly state = newCheckState();
   private readonly abort = new AbortController();
   private readonly phases = new Map<number, Text>();
   /** 停在确认页、等教练处理的学员 */
   private readonly holds = new Map<number, Hold>();
+  /** 每个学员最近一次读完考位的考点和时刻。让位时用来判断 B 准备好没有 */
+  private readonly listed = new Map<number, { centreId: number; at: number }>();
   /** 每个学员当前这次操作（一轮检查、确认考位）的中断器。暂停时用它立刻停下 */
   private readonly ops = new Map<number, AbortController>();
   private globalIntervalMs: number;
@@ -243,11 +255,6 @@ export class Service {
     return [...this.phases].filter(([, p]) => typeof p === 'object' && !Array.isArray(p) && p.k === 'phase.confirm').map(([id]) => id);
   }
 
-  /** 全部学员暂停访问网站到什么时候（被拦后退避）；没在退避时为 null */
-  backoffUntil(): number | null {
-    return this.deps.limiter.backoffUntil?.() ?? null;
-  }
-
   /** 立即为这个学员查一轮，不等刷新间隔。没在刷新或停在确认页时返回 false。仍受全局限速 */
   checkNow(id: number): boolean {
     if (!this.scheduler.activeIds().includes(id) || this.holds.has(id)) return false;
@@ -302,7 +309,7 @@ export class Service {
   /**
    * 设置让位：A（fromId）改约后，原考位由 B（toId）去抢。一对一。
    * B 的目标固定为 A 现在的考位（考点、日期、时间完全一致），不用另外设置；A 用它自己的目标找新考位。
-   * 双方都自动提交（点 Finish），设好后双方开始刷新。toId 为 null 时解除
+   * 是否自动提交跟全局自动改约开关走。设好后双方开始刷新。toId 为 null 时解除
    */
   setHandover(fromId: number, toId: number | null): HandoverResult {
     const { repo, clock, centres } = this.deps;
@@ -340,12 +347,6 @@ export class Service {
     this.startStudent(fromId);
     this.startStudent(toId);
     return 'ok';
-  }
-
-  /** 让位的双方自动提交（点 Finish），即使全局自动改约关闭 */
-  autoSubmit(id: number): boolean {
-    const s = this.deps.repo.getStudent(id);
-    return !!s && (s.handoverTo !== null || !!this.deps.repo.handoverFrom(id));
   }
 
   /** 停在确认页的学员：所选考位和保留到什么时候 */
@@ -421,11 +422,8 @@ export class Service {
 
     // 回到查看预约页，读取当前预约（也就离开了确认页）。用 login：能后退就后退，
     // 教练在浏览器里提交后停在完成页、后退不回去时，重新登录读取。
-    // 网站正在退避时不碰网站：放弃就直接关浏览器；教练说已提交的，等退避结束再读
     let after: BookingInfo | null = null;
     try {
-      if (session && reason !== 'submitted' && this.deps.limiter.backoffUntil?.()) throw new Error('backoff');
-      if (session) await this.deps.limiter.waitBackoff?.(this.abort.signal);
       if (session) after = await session.login(student.bookingId, student.surname);
     } catch {
       after = null;
@@ -479,11 +477,56 @@ export class Service {
     return reason === 'submitted' ? 'unchanged' : 'resumed';
   }
 
-  /** 开始一次针对学员的操作，返回它的中断信号（退出程序或暂停这个学员时触发） */
-  private beginOp(id: number): AbortSignal {
+  /** B 准备好了：浏览器开着、最近查过这个考点，而且没停在确认页 */
+  private handoverReady(toId: number, centreId: number): boolean {
+    const l = this.listed.get(toId);
+    return !!l && l.centreId === centreId && this.deps.clock.now() - l.at <= HANDOVER_READY_MS && this.sessions.has(toId) && !this.holds.has(toId);
+  }
+
+  /**
+   * 让位的 A 点 Finish 之前：等 B 准备好。两个浏览器加载速度不一样，A 走到确认页时 B 可能还在登录、等网站响应，
+   * 这时提交 A 的原考位就白白放给了别人。B 没在刷新就先启动它、让它马上查一轮。
+   * 返回 null 可以提交；等了 HANDOVER_WAIT_MS 还没好，返回原因，停在确认页交给教练
+   */
+  private async waitHandoverReady(fromId: number, slot: Slot, signal: AbortSignal): Promise<Text | null> {
+    const { repo, clock, centres } = this.deps;
+    const a = repo.getStudent(fromId);
+    const b = a?.handoverTo != null ? repo.getStudent(a.handoverTo) : undefined;
+    if (!a || !b || b.status === 'done') return null;
+    const name = a.current.centreName.trim().toLowerCase();
+    const centre = [...centres.values()].find((c) => c.name.trim().toLowerCase() === name);
+    if (!centre) return null;
+    if (this.handoverReady(b.id, centre.id)) return null;
+
+    repo.log(fromId, 'info', msg('log.handover_wait', { who: b.label }), clock.now());
+    this.phases.set(fromId, msg('phase.handover_wait', { who: b.label }));
+    const end = clock.now() + HANDOVER_WAIT_MS;
+    let nudged = false;
+    while (clock.now() < end) {
+      const cur = repo.getStudent(b.id);
+      if (!cur || cur.status === 'done' || repo.getStudent(fromId)?.handoverTo !== b.id) return null;
+      if (this.handoverReady(b.id, centre.id)) {
+        repo.log(fromId, 'info', msg('log.handover_ready', { who: b.label }), clock.now());
+        return null;
+      }
+      // B 没在刷新（被暂停或出错暂停）就启动它；在刷新就让它马上查一轮，不等间隔
+      if (!nudged) {
+        nudged = true;
+        if (!this.scheduler.activeIds().includes(b.id)) {
+          if (!this.holds.has(b.id)) this.startStudent(b.id, true);
+        } else this.scheduler.runNow(b.id);
+      }
+      await clock.sleep(1000, signal);
+    }
+    const where = { centre: centres.get(slot.centreId)?.name ?? '', date: slot.date, time: slot.time };
+    return msg('status.handover_wait_timeout', { who: b.label, min: HANDOVER_WAIT_MS / 60_000, ...where });
+  }
+
+  /** 开始一次针对学员的操作，返回中断器和它的信号（退出程序或暂停这个学员时触发） */
+  private beginOp(id: number): { ac: AbortController; signal: AbortSignal } {
     const ac = new AbortController();
     this.ops.set(id, ac);
-    return AbortSignal.any([this.abort.signal, ac.signal]);
+    return { ac, signal: AbortSignal.any([this.abort.signal, ac.signal]) };
   }
 
   private checkDeps(signal: AbortSignal = this.abort.signal): CheckDeps {
@@ -499,11 +542,12 @@ export class Service {
       centres: d.centres,
       autoRebookEnabled: this.autoRebook,
       notify: (e) => this.notify(e),
-      autoSubmit: (id) => this.autoSubmit(id),
       state: this.state,
       onPhase: (id, p) => this.phases.set(id, p),
       onConfirmReady: (id, slot) => this.startHold(id, slot),
       onReleased: (id, old) => void this.released(id, old),
+      onListed: (id, centreId) => this.listed.set(id, { centreId, at: d.clock.now() }),
+      beforeFinish: (id, slot) => this.waitHandoverReady(id, slot, signal),
     };
   }
 
@@ -515,16 +559,17 @@ export class Service {
         return;
       }
       this.phases.set(id, msg('phase.prepare'));
-      const signal = this.beginOp(id);
+      const op = this.beginOp(id);
       let outcome;
       try {
-        outcome = await checkStudent(id, this.checkDeps(signal));
+        outcome = await checkStudent(id, this.checkDeps(op.signal));
       } finally {
         this.phases.delete(id);
-        this.ops.delete(id);
+        // 暂停期间旧操作还没收尾、新操作已经开始时，别删掉新操作的中断器
+        if (this.ops.get(id) === op.ac) this.ops.delete(id);
       }
       // 只要这一轮跑过（没有因为退出或暂停而中断），就算一轮
-      if (!signal.aborted && this.deps.repo.getStudent(id)) this.deps.repo.countRound(id, this.deps.clock.now());
+      if (!op.signal.aborted && this.deps.repo.getStudent(id)) this.deps.repo.countRound(id, this.deps.clock.now());
       if (outcome === 'stop') {
         this.scheduler.stop(id);
         await this.dropSession(id);
@@ -546,13 +591,13 @@ export class Service {
       return 'gone';
     }
 
-    const signal = this.beginOp(student.id);
-    const deps = this.checkDeps(signal);
+    const op = this.beginOp(student.id);
+    const deps = this.checkDeps(op.signal);
     try {
       return await this.acceptChecked(offerId, student, slot, deps);
     } finally {
       this.phases.delete(student.id);
-      this.ops.delete(student.id);
+      if (this.ops.get(student.id) === op.ac) this.ops.delete(student.id);
     }
   }
 
@@ -560,12 +605,10 @@ export class Service {
     const { repo, limiter } = this.deps;
     const offer = repo.getOffer(offerId)!;
     try {
-      await limiter.waitBackoff?.(deps.signal);
       const session = await this.getSession(student.id, deps.signal);
       repo.setCurrent(student.id, await session.login(student.bookingId, student.surname));
       await limiter.acquire(deps.signal);
       const listed = await session.listSlots(offer.centreId, offer.date, offer.date);
-      limiter.reportOk();
       if (!listed.some((s) => s.centreId === slot.centreId && s.date === slot.date && s.time === slot.time)) {
         repo.setOfferState(offerId, 'gone');
         return 'gone';
@@ -596,6 +639,13 @@ export class Service {
   private async getSession(id: number, signal: AbortSignal = this.abort.signal): Promise<SiteSession> {
     // 退出或暂停过程中不再打开新的浏览器
     if (signal.aborted) throw new TextError(msg('err.exiting'));
+    // 上一个浏览器还在关（比如刚暂停马上点继续）：同一资料目录，旧 Chrome 没退出时
+    // 新实例会把请求转交给它然后自己退出，调试端口永远连不上。等它关完再开
+    const pending = this.pendingClose.get(id);
+    if (pending) {
+      await pending;
+      if (signal.aborted) throw new TextError(msg('err.exiting'));
+    }
     let s = this.sessions.get(id);
     if (!s) {
       s = await this.deps.openSession(id);
@@ -606,6 +656,8 @@ export class Service {
       }
       this.sessions.set(id, s);
     }
+    // 让位里接位的学员：停在选时间页时每次检查重新载入页面，考位一放出就能直接点（hot）
+    s.setHot?.(this.deps.repo.handoverFrom(id) !== undefined);
     return s;
   }
 
@@ -613,14 +665,18 @@ export class Service {
     const s = this.sessions.get(id);
     if (!s) return;
     this.sessions.delete(id);
+    // 浏览器关了，让位时就不算准备好
+    this.listed.delete(id);
     const p = s.close().catch(() => {
       // 关闭失败不影响流程
     });
     this.closing.add(p);
+    this.pendingClose.set(id, p);
     try {
       await p;
     } finally {
       this.closing.delete(p);
+      if (this.pendingClose.get(id) === p) this.pendingClose.delete(id);
     }
   }
 
