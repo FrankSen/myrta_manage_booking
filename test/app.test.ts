@@ -188,7 +188,7 @@ describe('添加学员时的临时读取', () => {
     expect(app.repo.listStudents()).toHaveLength(0);
   });
 
-  test('用 probe 目录，同时添加两个学员时排队，不会同时开两个浏览器；每次清空上一次的登录状态', async () => {
+  test('用 probe 目录，同时添加两个学员时排队，不会同时开两个浏览器', async () => {
     const d = dir();
     let open = 0;
     let maxOpen = 0;
@@ -197,9 +197,7 @@ describe('添加学员时的临时读取', () => {
       runtimeDir: d, centresFile, openWindow: () => null, settings,
       openSession: async (id, profileDir) => {
         expect(id).toBeNull();
-        expect(existsSync(join(profileDir, 'leftover'))).toBe(false);
         mkdirSync(profileDir, { recursive: true });
-        writeFileSync(join(profileDir, 'leftover'), 'x');
         dirs.push(profileDir);
         open++;
         maxOpen = Math.max(maxOpen, open);
@@ -217,6 +215,32 @@ describe('添加学员时的临时读取', () => {
     expect([a.status, b.status]).toEqual([201, 201]);
     expect(maxOpen).toBe(1);
     expect(dirs).toEqual([join(d, 'browser-profile', 'probe'), join(d, 'browser-profile', 'probe')]);
+  });
+
+  test('上一次读取成功的浏览器资料（站点防护 cookie 等）带给下一次读取，但进程锁文件不带；读取失败不更新', async () => {
+    const d = dir();
+    const seen: { cookie: boolean; lock: boolean }[] = [];
+    let n = 0;
+    app = await startApp({
+      runtimeDir: d, centresFile, openWindow: () => null, settings,
+      openSession: async (_id, profileDir) => {
+        mkdirSync(profileDir, { recursive: true });
+        seen.push({ cookie: existsSync(join(profileDir, 'cookie')), lock: existsSync(join(profileDir, 'SingletonLock')) });
+        writeFileSync(join(profileDir, 'cookie'), `c${n}`);
+        writeFileSync(join(profileDir, 'SingletonLock'), 'pid');
+        const s = new FakeSession();
+        if (n++ === 1) s.loginError = new Error('坏了');
+        return s;
+      },
+    });
+    expect((await post(app, '1234567890')).status).toBe(201); // 第 1 次：空白目录，成功，存成种子
+    expect((await post(app, '1234567891')).status).toBe(422); // 第 2 次：带种子，读取失败，不更新种子
+    const { readFileSync } = await import('node:fs');
+    expect(readFileSync(join(d, 'browser-profile', 'seed', 'cookie'), 'utf8')).toBe('c0'); // 失败的那次没有覆盖种子
+    expect((await post(app, '1234567892')).status).toBe(201); // 第 3 次：仍然带第 1 次的种子，成功后种子更新
+    expect(seen).toEqual([{ cookie: false, lock: false }, { cookie: true, lock: false }, { cookie: true, lock: false }]);
+    expect(readFileSync(join(d, 'browser-profile', 'seed', 'cookie'), 'utf8')).toBe('c2');
+    expect(existsSync(join(d, 'browser-profile', 'seed', 'SingletonLock'))).toBe(false);
   });
 
   test('读取成功后，资料目录改名给这个学员用；失败时不留下', async () => {

@@ -1,4 +1,5 @@
-import { existsSync, readFileSync, readdirSync, renameSync, rmSync } from 'node:fs';
+import { cpSync, existsSync, readFileSync, readdirSync, renameSync, rmSync } from 'node:fs';
+import { basename } from 'node:path';
 import type { ChildProcess } from 'node:child_process';
 import { indexCentres } from '../domain/geo.ts';
 import type { BookingInfo, Centre } from '../domain/types.ts';
@@ -85,6 +86,21 @@ export async function startApp(opts: AppOptions): Promise<App> {
     const license = opts.requireLicense ? new LicenseGate({ path: paths.license, repo, now: () => clock.now(), publicKey: opts.licensePublicKey }) : null;
 
     const probeDir = `${paths.browserProfiles}/probe`;
+    // 种子资料目录：上一次读取成功的浏览器资料（站点防护的 cookie、浏览器缓存）。新建学员的读取前拷一份给 probe 用，
+    // 不再每次从空白开始。实测空白资料目录打开首页要 30–90 秒（超过 90 秒会超时），带着这些的只要 10 秒左右
+    const seedDir = `${paths.browserProfiles}/seed`;
+    /** 拷贝浏览器资料目录。跳过进程锁文件（它们指向原来的进程，拷过去浏览器会误以为目录被占用） */
+    const copyProfile = (from: string, to: string): boolean => {
+      try {
+        rmSync(to, { recursive: true, force: true });
+        cpSync(from, to, { recursive: true, filter: (p) => !/^(Singleton.*|lockfile|DevToolsActivePort)$/.test(basename(p)) });
+        return true;
+      } catch {
+        // 拷贝失败（文件被占用、磁盘满）不影响添加：这次从空白目录开始
+        rmSync(to, { recursive: true, force: true });
+        return false;
+      }
+    };
     // 读取成功后，probe 目录改名留给这个学员用，不用再新建一个浏览器资料目录（新建时浏览器会写一大批文件，
     // 有的电脑安全软件会把这些当成"下载"一直弹窗）。键是 Booking number，只在内存里
     const pendingProfiles = new Map<string, string>();
@@ -179,8 +195,9 @@ export async function startApp(opts: AppOptions): Promise<App> {
             } catch {
               throw new TextError(msg(cancel.signal.aborted ? 'err.read_cancelled' : 'err.exiting'));
             }
-            // 每次清空，避免上一个学员的登录状态带到这一个
+            // 每次重建：从种子拷一份（有的话），没有种子就从空白开始。登录状态在服务器那边，浏览器关了就没了
             rmSync(probeDir, { recursive: true, force: true });
+            if (existsSync(seedDir)) copyProfile(seedDir, probeDir);
             if (probeAbort.signal.aborted) throw new TextError(msg('err.exiting'));
             const session = await opts.openSession(null, probeDir);
             probeSession = session;
@@ -201,6 +218,8 @@ export async function startApp(opts: AppOptions): Promise<App> {
               const old = pendingProfiles.get(bookingId);
               if (old) rmSync(old, { recursive: true, force: true });
               pendingProfiles.set(bookingId, pending);
+              // 读取成功：把这份资料存成新的种子，下次添加直接用
+              copyProfile(pending, seedDir);
             } catch {
               // 改名失败（例如文件被占用）不影响添加，下次读取前会清空
             }
